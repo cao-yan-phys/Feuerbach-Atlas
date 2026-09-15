@@ -1,0 +1,1 @@
+An interactive atlas of Feuerbach configurations in all nine two-dimensional Cayley–Klein geometries: $S^2$, $\mathbb{R}^2$, $H^2$, $\mathrm{dS}^2$, $\mathbb{R}^{1,1}$, $\mathrm{AdS}^2$, $`\mathrm{NH}_{-}`$, $`\mathbb{G}^2`$, and $`\mathrm{NH}_{+}`$.

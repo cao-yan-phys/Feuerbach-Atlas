@@ -1,0 +1,1061 @@
+@font-face {
+  font-family: 'Old Standard Math';
+  src: url('/fonts/OldStandard-Math.otf') format('opentype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  color: #171717;
+  background: #fbfbf8;
+  font-family: 'Old Standard Math', serif;
+  font-size: 120%;
+  --vertex-0: #ff0000;
+  --vertex-1: #00ff00;
+  --vertex-2: #0000ff;
+  --incenter: #8a2be2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
+
+.katex,
+.katex math {
+  font-family: 'Old Standard Math', serif;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid #305a74;
+  outline-offset: 3px;
+}
+
+.atlas-shell {
+  display: grid;
+  grid-template-columns: minmax(160px, 195px) minmax(0, 1fr) minmax(174px, 215px);
+  gap: 18px;
+  width: calc(100vw - 32px);
+  margin: 0 auto;
+  padding: 12px 0 36px;
+}
+
+.atlas-title {
+  width: 100%;
+}
+
+.atlas-sidebar {
+  display: grid;
+  grid-column: 1;
+  grid-row: 1;
+  align-content: start;
+  gap: 18px;
+  min-width: 0;
+  padding-right: 8px;
+  position: relative;
+}
+
+.atlas-workspace {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  transform: translateX(6px);
+}
+
+h1 {
+  display: grid;
+  margin: 0;
+  font-size: clamp(1.74rem, 3.6vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: left;
+}
+
+.atlas-word {
+  font-weight: 400;
+}
+
+h1 [data-katex],
+h1 [data-katex] * {
+  font-synthesis: weight;
+  font-weight: 700 !important;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.indicatrix-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.mode-button {
+  min-height: 42px;
+  border: 1px solid #b9b9b2;
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
+.mode-button:hover,
+.mode-button.is-active {
+  border-color: #305a74;
+  background: #edf3f5;
+}
+
+.viewport-panel {
+  min-height: min(68vh, 720px);
+  border: 1px solid #c9c9c2;
+  background: #fff;
+}
+
+.geometry-viewport {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: min(68vh, 720px);
+  shape-rendering: geometricPrecision;
+}
+
+.geometry-viewport path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.panel-button,
+.select-control select {
+  min-height: 36px;
+  border: 1px solid #b9b9b2;
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+}
+
+.panel-button {
+  padding: 0 13px;
+  cursor: pointer;
+}
+
+.panel-button:hover {
+  border-color: #305a74;
+  background: #edf3f5;
+}
+
+.export-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% - 8px);
+}
+
+.export-controls .panel-button {
+  padding: 0 6px;
+  font-size: 0.78rem;
+}
+
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+  align-content: start;
+  gap: 12px;
+  height: min(68vh, 720px);
+  min-width: 0;
+  position: relative;
+}
+
+.select-control {
+  display: grid;
+  gap: 5px;
+  color: #52524d;
+  font-size: 0.83rem;
+}
+
+.select-control select {
+  min-width: 128px;
+  width: 100%;
+  padding: 0 8px;
+  color: #171717;
+  font-size: 0.94rem;
+}
+
+.branch-control {
+  display: grid;
+  gap: 5px;
+  color: #52524d;
+  font-size: 0.83rem;
+}
+
+.branch-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.parabolic-preset-options {
+  display: grid;
+  gap: 4px;
+}
+
+.parabolic-preset-options .branch-button {
+  text-align: center;
+}
+
+.parabolic-chart-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.branch-button {
+  min-height: 36px;
+  padding: 0 6px;
+  border: 1px solid #b9b9b2;
+  border-radius: 4px;
+  background: #fff;
+  color: #171717;
+  cursor: pointer;
+}
+
+.branch-button:hover,
+.branch-button.is-active {
+  border-color: #1d5f7d;
+  background: #eaf4f8;
+}
+
+.branch-button.branch-0 {
+  color: var(--incenter);
+}
+
+.branch-button.branch-1 {
+  color: var(--vertex-0);
+}
+
+.branch-button.branch-2 {
+  color: var(--vertex-1);
+}
+
+.branch-button.branch-3 {
+  color: var(--vertex-2);
+}
+
+.dual-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #b5a978;
+  border-radius: 999px;
+  color: #65531c;
+  background: #fffdf4;
+  cursor: pointer;
+}
+
+.dual-button:hover,
+.dual-button.is-active {
+  border-color: #806515;
+  background: #f4edca;
+}
+
+.toggle-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.indicatrix-range-section {
+  display: grid;
+  gap: 6px;
+  color: #52524d;
+  font-size: 0.83rem;
+}
+
+.indicatrix-range {
+  display: grid;
+  grid-template-columns: 24px 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.indicatrix-range > span {
+  text-align: center;
+  color: #171717;
+}
+
+.indicatrix-range > output {
+  text-align: center;
+  color: #171717;
+  font-variant-numeric: tabular-nums;
+}
+
+.indicatrix-range > input {
+  width: 100%;
+  margin: 0;
+  accent-color: #305a74;
+}
+
+.indicatrix-data-controls {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+}
+
+.indicatrix-data-panel .advanced-content {
+  grid-template-columns: 250px;
+}
+
+.indicatrix-data-panel .indicatrix-data-controls {
+  grid-column: 1;
+}
+
+.indicatrix-data-panel .indicatrix-range {
+  grid-template-columns: 24px 42px minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+.indicatrix-range.vertex-0 > span {
+  color: var(--vertex-0);
+}
+
+.indicatrix-range.vertex-1 > span {
+  color: var(--vertex-1);
+}
+
+.indicatrix-range.vertex-2 > span {
+  color: var(--vertex-2);
+}
+
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid #d1d1ca;
+  border-radius: 4px;
+  color: #42423d;
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-control input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #305a74;
+}
+
+.curvature-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  color: #52524d;
+  font-size: 0.83rem;
+}
+
+.curvature-label {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.curvature-control input {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: 100%;
+  margin: 0;
+  accent-color: #305a74;
+}
+
+.curvature-control output {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  color: #171717;
+  font-variant-numeric: tabular-nums;
+}
+
+.toggle-control.has-tooltip {
+  position: relative;
+}
+
+.toggle-tooltip {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 228px;
+  padding: 7px 9px;
+  border: 1px solid #aaa9a1;
+  border-radius: 3px;
+  color: #262622;
+  background: #fffefa;
+  box-shadow: 0 2px 7px #0000001a;
+  font-size: 0.74rem;
+  line-height: 1.32;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+  visibility: hidden;
+}
+
+.toggle-control.has-tooltip:hover .toggle-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.toggle-euler > span {
+  color: #171717;
+  font-weight: 700;
+}
+
+.toggle-circumcircle > span {
+  color: #777771;
+  font-weight: 700;
+}
+
+.toggle-tangent > span {
+  font-weight: 700;
+}
+
+.toggle-tangent.tangent-branch-0 > span {
+  color: var(--incenter);
+}
+
+.toggle-tangent.tangent-branch-1 > span {
+  color: var(--vertex-0);
+}
+
+.toggle-tangent.tangent-branch-2 > span {
+  color: var(--vertex-1);
+}
+
+.toggle-tangent.tangent-branch-3 > span {
+  color: var(--vertex-2);
+}
+
+.toggle-homothety > span {
+  color: #806515;
+  font-weight: 700;
+}
+
+.toggle-homothety input {
+  accent-color: #806515;
+}
+
+.homothety-control {
+  display: grid;
+  gap: 6px;
+}
+
+.homothety-progress {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  accent-color: #806515;
+}
+
+.advanced-panel {
+  margin-top: 16px;
+  color: #3e3e39;
+}
+
+.advanced-panel summary {
+  padding: 12px 0;
+  cursor: pointer;
+}
+
+.advanced-content {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 1fr);
+  gap: 18px;
+  padding: 4px 0 16px;
+}
+
+.coordinate-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.coordinate-header,
+.coordinate-row {
+  display: grid;
+  grid-template-columns: 22px repeat(2, 94px);
+  align-items: center;
+  gap: 8px;
+}
+
+.coordinate-header {
+  color: #676760;
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+.coordinate-row > span {
+  font-weight: 700;
+  text-align: center;
+}
+
+.data-vertex-label.data-vertex-0 {
+  color: var(--vertex-0);
+}
+
+.data-vertex-label.data-vertex-1 {
+  color: var(--vertex-1);
+}
+
+.data-vertex-label.data-vertex-2 {
+  color: var(--vertex-2);
+}
+
+.coordinate-row input {
+  height: 31px;
+  border: 1px solid #bdbdb7;
+  border-radius: 3px;
+  padding: 0 7px;
+  color: #171717;
+  background: #fff;
+  text-align: center;
+}
+
+.details-content {
+  display: grid;
+  gap: 8px;
+  padding: 4px 0 16px;
+}
+
+.note-content {
+  padding: 4px 0 16px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  font-size: 0.84rem;
+}
+
+.detail-row > span:first-child {
+  color: #676760;
+}
+
+.detail-formula {
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.readout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 32px;
+  align-content: start;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.readout div {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #ededeb;
+}
+
+.readout dt,
+.readout dd {
+  margin: 0;
+  text-align: center;
+}
+
+.readout dd {
+  color: #1c1c19;
+}
+
+.boundary {
+  stroke: #a9aaa6;
+  stroke-width: 1.2;
+  stroke-dasharray: 4 5;
+}
+
+.minkowski-null-boundary,
+.lorentzian-null-grid {
+  stroke: #e1e1db;
+  stroke-width: 0.7;
+}
+
+.horizon {
+  stroke: #171717;
+  stroke-width: 1.6;
+  stroke-dasharray: 8 5;
+}
+
+.parabolic-fiber {
+  stroke: #777771;
+  stroke-width: 0.95;
+}
+
+.triangle {
+  stroke: #171717;
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.triangle.lambda-negative-side {
+  stroke-width: 3.5;
+}
+
+.bisector {
+  stroke: #787871;
+  stroke-width: 1.25;
+  stroke-dasharray: 5 4;
+}
+
+.altitude {
+  stroke: #ff0000;
+  stroke-width: 1.25;
+}
+
+.cycle-euler {
+  stroke: #171717;
+  stroke-width: 2.15;
+}
+
+.cycle-circumcircle {
+  stroke: #777771;
+  stroke-width: 1.7;
+}
+
+.cycle-euclidean-circumcircle,
+.cycle-minkowski-circumcircle {
+  stroke: #777771;
+  stroke-width: 1.7;
+  stroke-dasharray: 6 5;
+}
+
+.cycle-tangent {
+  stroke: var(--incenter);
+  stroke-width: 2.15;
+}
+
+.cycle-tangent.excenter-1 {
+  stroke: var(--vertex-0);
+}
+
+.cycle-tangent.excenter-2 {
+  stroke: var(--vertex-1);
+}
+
+.cycle-tangent.excenter-3 {
+  stroke: var(--vertex-2);
+}
+
+.cycle-homothety-image {
+  stroke-width: 1.35;
+  stroke-dasharray: 5 4;
+}
+
+.vertex-0 {
+  --construction-color: var(--vertex-0);
+}
+
+.vertex-1 {
+  --construction-color: var(--vertex-1);
+}
+
+.vertex-2 {
+  --construction-color: var(--vertex-2);
+}
+
+.triangle.vertex-0,
+.triangle.vertex-1,
+.triangle.vertex-2,
+.bisector.vertex-0,
+.bisector.vertex-1,
+.bisector.vertex-2,
+.altitude.vertex-0,
+.altitude.vertex-1,
+.altitude.vertex-2 {
+  stroke: var(--construction-color);
+}
+
+.vertex {
+  fill: var(--construction-color, #171717);
+  stroke: #fff;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+
+.vertex:active {
+  cursor: grabbing;
+}
+
+.foot-marker {
+  fill: #171717;
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.altitude-marker {
+  fill: var(--construction-color, #ff0000);
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.contact-marker {
+  fill: var(--incenter);
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.contact-marker.excenter-1 {
+  fill: var(--vertex-0);
+}
+
+.contact-marker.excenter-2 {
+  fill: var(--vertex-1);
+}
+
+.contact-marker.excenter-3 {
+  fill: var(--vertex-2);
+}
+
+.circumcircle-center-marker {
+  fill: #777771;
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.euclidean-circumcenter-marker,
+.minkowski-circumcenter-marker {
+  fill: #171717;
+  stroke: #fff;
+  stroke-width: 1.1;
+  cursor: context-menu;
+}
+
+.euclidean-circumcenter-marker.is-active,
+.minkowski-circumcenter-marker.is-active {
+  stroke: #ffd700;
+  stroke-width: 2.2;
+}
+
+.boost-toggle {
+  fill: none;
+  stroke: #171717;
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  cursor: context-menu;
+}
+
+.boost-toggle.is-active {
+  stroke-width: 1.4;
+  stroke-dasharray: none;
+}
+
+.area-bisector-center-marker {
+  fill: #ff4f9a;
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.area-bisector-center-marker.is-active {
+  stroke: #171717;
+  stroke-width: 1.5;
+}
+
+.indicatrix-circum {
+  stroke: #777771;
+  stroke-width: 2.2;
+}
+
+.indicatrix-translated {
+  stroke: var(--construction-color);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+  opacity: 0.3;
+}
+
+.indicatrix-feuerbach-forward {
+  stroke: #171717;
+  stroke-width: 2.25;
+}
+
+.indicatrix-feuerbach-reflected {
+  stroke: #171717;
+  stroke-width: 2.25;
+  stroke-dasharray: 7 5;
+}
+
+.indicatrix-triangle {
+  stroke: var(--construction-color);
+  stroke-width: 1.7;
+}
+
+.indicatrix-median {
+  stroke: var(--construction-color);
+  stroke-width: 1.25;
+  stroke-dasharray: 5 4;
+}
+
+.indicatrix-orthocenter-link {
+  stroke: var(--construction-color);
+  stroke-width: 1.1;
+}
+
+.lorentz-cone {
+  stroke: #b8b8b0;
+  stroke-width: 0.9;
+  stroke-dasharray: 4 5;
+}
+
+.indicatrix-origin {
+  fill: #777771;
+  stroke: #fff;
+  stroke-width: 1.1;
+}
+
+.indicatrix-centroid {
+  fill: #ff4f9a;
+  stroke: #fff;
+  stroke-width: 1.1;
+  cursor: context-menu;
+}
+
+.indicatrix-centroid.is-active {
+  stroke: #171717;
+  stroke-width: 1.6;
+}
+
+.indicatrix-orthocenter {
+  fill: #171717;
+  stroke: #fff;
+  stroke-width: 1.2;
+}
+
+.indicatrix-side-midpoint {
+  fill: #fff;
+  stroke: var(--construction-color);
+  stroke-width: 1.7;
+}
+
+.indicatrix-vertex-midpoint {
+  fill: var(--construction-color);
+  stroke: #fff;
+  stroke-width: 1.1;
+}
+
+.indicatrix-notice {
+  margin-top: 8px;
+  color: #8b2d2d;
+  font-size: 0.85rem;
+}
+
+.indicatrix-notice:empty {
+  display: none;
+}
+
+.altitude-center-marker {
+  fill: #ff8c00;
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.ninepoint-center-marker {
+  fill: #171717;
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.incenter-marker {
+  fill: var(--incenter);
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.excenter-marker.excenter-1 {
+  fill: var(--vertex-0);
+}
+
+.excenter-marker.excenter-2 {
+  fill: var(--vertex-1);
+}
+
+.excenter-marker.excenter-3 {
+  fill: var(--vertex-2);
+}
+
+.excenter-marker {
+  fill: var(--vertex-0);
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.euler-ideal-marker,
+.tangent-ideal-marker,
+.ninepoint-ideal-marker,
+.incenter-ideal-marker,
+.excenter-ideal-marker,
+.ideal-contact-marker {
+  fill: #fff;
+  stroke-width: 2;
+}
+
+.euler-ideal-marker {
+  stroke: #171717;
+}
+
+.ninepoint-ideal-marker {
+  stroke: #171717;
+}
+
+.tangent-ideal-marker {
+  stroke: var(--incenter);
+}
+
+.incenter-ideal-marker,
+.ideal-contact-marker {
+  stroke: var(--incenter);
+}
+
+.excenter-ideal-marker.excenter-1 {
+  stroke: var(--vertex-0);
+}
+
+.excenter-ideal-marker.excenter-2 {
+  stroke: var(--vertex-1);
+}
+
+.excenter-ideal-marker.excenter-3 {
+  stroke: var(--vertex-2);
+}
+
+.excenter-ideal-marker {
+  stroke: var(--vertex-0);
+}
+
+.grid-line {
+  stroke: #e1e1db;
+  stroke-width: 0.7;
+}
+
+.grid-axis,
+.grid-tick {
+  stroke: #85857e;
+  stroke-width: 0.9;
+}
+
+.grid-axis-arrow {
+  fill: none;
+  stroke: #85857e;
+  stroke-linecap: round;
+  stroke-width: 1.2;
+}
+
+.grid-coordinate-label {
+  overflow: visible;
+  pointer-events: none;
+}
+
+.grid-coordinate-label math {
+  color: #52524d;
+  font-family: "Old Standard Math", serif;
+  font-size: 18px;
+  font-style: italic;
+}
+
+.grid-label {
+  fill: #66665f;
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+}
+
+@media (max-width: 760px) {
+  .atlas-shell {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .atlas-title,
+  .atlas-sidebar,
+  .atlas-workspace,
+  .control-panel {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .atlas-sidebar {
+    padding: 0 0 14px;
+  }
+
+  .control-panel {
+    height: auto;
+  }
+
+  .export-controls {
+    position: static;
+    margin-top: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .atlas-shell {
+    width: calc(100vw - 20px);
+    padding-top: 16px;
+  }
+
+  .viewport-panel,
+  .geometry-viewport {
+    min-height: 430px;
+  }
+
+  .control-panel {
+    align-items: stretch;
+  }
+
+  .select-control {
+    min-width: 0;
+  }
+
+  .select-control select {
+    width: 100%;
+  }
+
+  .advanced-content {
+    grid-template-columns: 1fr;
+  }
+}
