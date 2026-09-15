@@ -574,6 +574,30 @@ h1 [data-katex] * {
   white-space: nowrap;
 }
 
+.indicatrix-details {
+  display: grid;
+  gap: 15px;
+  padding: 4px 0 16px;
+}
+
+.indicatrix-detail {
+  display: grid;
+  gap: 5px;
+}
+
+.indicatrix-detail-label {
+  color: #676760;
+  font-size: 0.84rem;
+}
+
+.indicatrix-detail-formula {
+  display: block;
+  overflow-x: auto;
+  padding: 1px 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .readout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -810,6 +834,11 @@ h1 [data-katex] * {
 .indicatrix-feuerbach-forward {
   stroke: #171717;
   stroke-width: 2.25;
+}
+
+.indicatrix-euler-line {
+  stroke: #171717;
+  stroke-width: 1.5;
 }
 
 .indicatrix-feuerbach-reflected {

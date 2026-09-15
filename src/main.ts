@@ -6,11 +6,11 @@ import { curvedDomain, isCurvedMode, liftForMode, metricForMode } from './geomet
 import { boostTriangle, rotateTriangle } from './math/affine'
 import { buildCurvedState } from './math/curvedKernel'
 import { buildFlatState, euclideanCircumcircle, flatCycleHomothety, minkowskiCircumcycle } from './math/flatKernel'
-import { buildIndicatrixConstruction, nearestLorentzFinslerParameter, nearestNormedParameter, normalizeLorentzFinslerShape, normalizeNormedShape, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from './math/indicatrixKernel'
+import { buildIndicatrixConstruction, lorentzFinslerIndicatrixPoint, normedIndicatrixPoint, normalizeLorentzFinslerShape, normalizeNormedShape, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from './math/indicatrixKernel'
 import { bilinear3, scale3 } from './math/linalg'
 import { buildParabolicState, canonicalParabolicParameters, canonicalToRawParabolic, isParabolicMode, parabolicDefaultKappa, parabolicDisplayPoint, parabolicModeForKappa, parabolicPointFromDisplay, type ParabolicChart, type ParabolicView } from './math/parabolicKernel'
 import type { GeometryMode, Vec2, Vec3 } from './math/types'
-import { renderIndicatrixViewport, type IndicatrixBounds, type IndicatrixOverlays, type IndicatrixSimilarity, type IndicatrixViewportTransform } from './render/indicatrixViewport'
+import { indicatrixViewportBounds, renderIndicatrixViewport, type IndicatrixOverlays, type IndicatrixSimilarity, type IndicatrixViewportTransform } from './render/indicatrixViewport'
 import { renderViewport, type Overlays, type ViewportTransform } from './render/svgViewport'
 
 const atlasModes: Array<[GeometryMode, string, string]> = [
@@ -37,14 +37,20 @@ interface AtlasState {
 
 interface IndicatrixState {
   mode: IndicatrixMode
-  positions: [number, number, number]
+  vertices: [Vec2, Vec2, Vec2]
   normedShape: NormedShape
   lorentzShape: LorentzFinslerShape
   similarity: IndicatrixSimilarity
   overlays: IndicatrixOverlays
 }
 
-const indicatrixDefaultPositions = (mode: IndicatrixMode): [number, number, number] => mode === 'normed' ? [0.18, 2.28, 4.35] : [-0.8, 0.1, 0.9]
+const indicatrixDefaultVertices = (mode: IndicatrixMode, normedShape: NormedShape, lorentzShape: LorentzFinslerShape): [Vec2, Vec2, Vec2] => {
+  const parameters = mode === 'normed' ? [0.18, 2.28, 4.35] : [-0.8, 0.1, 0.9]
+  const pointAt = mode === 'normed'
+    ? (parameter: number) => normedIndicatrixPoint(normedShape, parameter)
+    : (parameter: number) => lorentzFinslerIndicatrixPoint(lorentzShape, parameter)
+  return parameters.map(pointAt) as [Vec2, Vec2, Vec2]
+}
 
 const cloneVertices = (vertices: [Vec2, Vec2, Vec2]): [Vec2, Vec2, Vec2] => vertices.map(([x, y]) => [x, y]) as [Vec2, Vec2, Vec2]
 
@@ -75,28 +81,32 @@ const atlasState: AtlasState = {
   }
 }
 
-const indicatrixInitialState = (): IndicatrixState => ({
-  mode: 'normed',
-  positions: indicatrixDefaultPositions('normed'),
-  normedShape: normalizeNormedShape([0.1, -0.05, 0.02]),
-  lorentzShape: normalizeLorentzFinslerShape([0.22, -0.16, 0.12]),
-  similarity: { translation: [0, 0], scale: 1 },
-  overlays: {
-    medians: true,
-    circum: true,
-    translated: false,
-    feuerbach: true,
-    midpoints: false,
-    centers: true
+const indicatrixInitialState = (): IndicatrixState => {
+  const normedShape = normalizeNormedShape([0.1, -0.05, 0.02])
+  const lorentzShape = normalizeLorentzFinslerShape([0.22, -0.16, 0.12])
+  return {
+    mode: 'normed',
+    vertices: indicatrixDefaultVertices('normed', normedShape, lorentzShape),
+    normedShape,
+    lorentzShape,
+    similarity: { translation: [0, 0], scale: 1 },
+    overlays: {
+      medians: true,
+      circum: true,
+      translated: false,
+      feuerbach: true,
+      midpoints: false,
+      centers: true,
+      grid: false
+    }
   }
-})
+}
 
 let activeView: 'atlas' | 'indicatrix' = 'atlas'
 let indicatrixState = indicatrixInitialState()
 let indicatrixCentroidTransformActive = false
-let indicatrixFixedBounds: IndicatrixBounds | null = null
 
-const indicatrixOverlayKeys = ['medians', 'circum', 'translated', 'feuerbach', 'midpoints', 'centers'] as const
+const indicatrixOverlayKeys = ['medians', 'circum', 'translated', 'feuerbach', 'midpoints', 'centers', 'grid'] as const
 
 const overlayKeys = ['bisectors', 'euler', 'altitudes', 'tangent', 'centers', 'circumcircle', 'euclideanCircumcircle', 'minkowskiCircumcircle', 'nullBoundary', 'horizon', 'homothety', 'grid', 'singularBranches'] as const
 
@@ -270,12 +280,6 @@ const indicatrixModeButtons = () => `
   </div>
 `
 
-const indicatrixPositionLabel = (index: number) => ['A', 'B', 'C'][index]!
-
-const indicatrixPositionBounds = () => indicatrixState.mode === 'normed'
-  ? { min: 0, max: 2 * Math.PI }
-  : { min: -1.65, max: 1.65 }
-
 const indicatrixShapeLabels = () => indicatrixState.mode === 'normed'
   ? ['a', 'b', 'c']
   : ['q_1', 'q_2', 'q_3']
@@ -289,7 +293,7 @@ const indicatrixControl = (key: keyof IndicatrixOverlays, label: string) => `
 
 const indicatrixControls = () => {
   const shape = indicatrixState.mode === 'normed' ? indicatrixState.normedShape : indicatrixState.lorentzShape
-  const feuLabel = indicatrixState.mode === 'normed' ? 'Feuerbach circle' : 'Feuerbach 3+3 branches'
+  const feuLabel = indicatrixState.mode === 'normed' ? 'Feuerbach circle' : 'Feuerbach indicatrix'
   return `
     <button class="panel-button" type="button" data-indicatrix-reset>Reset</button>
     <section class="indicatrix-range-section" aria-label="Shape">
@@ -305,31 +309,54 @@ const indicatrixControls = () => {
     <div class="toggle-grid">
       ${indicatrixControl('medians', 'Medians')}
       ${indicatrixControl('circum', 'Circum-indicatrix')}
-      ${indicatrixControl('translated', 'C-orthocenter')}
+      ${indicatrixControl('translated', '<span data-katex="C">C</span>-orthocenter')}
       ${indicatrixControl('feuerbach', feuLabel)}
       ${indicatrixControl('midpoints', 'Midpoints')}
       ${indicatrixControl('centers', 'Centers')}
+      ${indicatrixControl('grid', 'Grid')}
     </div>
   `
 }
 
 const indicatrixDataMarkup = () => {
-  const parameter = indicatrixState.mode === 'normed' ? '\\phi' : '\\theta'
-  const bounds = indicatrixPositionBounds()
   return `
     <div class="advanced-content">
-      <div class="indicatrix-data-controls">
-        ${indicatrixState.positions.map((value, index) => `
-          <label class="indicatrix-range vertex-${index}">
-            <span data-katex="${parameter}_{${indicatrixPositionLabel(index)}}">${parameter}_${indicatrixPositionLabel(index)}</span>
-            <output data-indicatrix-data-value="${index}">${value.toFixed(2)}</output>
-            <input type="range" min="${bounds.min}" max="${bounds.max}" step="0.01" value="${value}" data-indicatrix-position="${index}" aria-label="${indicatrixPositionLabel(index)} position" />
-          </label>
+      <div class="coordinate-controls">
+        <div class="coordinate-header">
+          <span></span>
+          <span data-katex="x">x</span>
+          <span data-katex="y">y</span>
+        </div>
+        ${indicatrixState.vertices.map((point, index) => `
+          <div class="coordinate-row">
+            <span class="data-vertex-label data-vertex-${index}">${String.fromCharCode(65 + index)}</span>
+            <input type="text" inputmode="decimal" value="${coordinateText(point[0])}" data-indicatrix-coordinate="${index}:0" aria-label="${String.fromCharCode(65 + index)} x" />
+            <input type="text" inputmode="decimal" value="${coordinateText(point[1])}" data-indicatrix-coordinate="${index}:1" aria-label="${String.fromCharCode(65 + index)} y" />
+          </div>
         `).join('')}
       </div>
     </div>
   `
 }
+
+const indicatrixDetailsMarkup = () => {
+  const normed = indicatrixState.mode === 'normed'
+  const unit = normed
+    ? 'h(\\phi)=1+a\\cos(2\\phi)+b\\sin(2\\phi)+c\\cos(4\\phi),\\quad (x,y)=h(\\phi)(\\cos\\phi,\\sin\\phi)+\\frac{d h}{d\\phi}(-\\sin\\phi,\\cos\\phi),\\quad 0\\leq\\phi\\lt2\\pi,\\quad h+\\frac{d^2h}{d\\phi^2}>0'
+    : '(\\mu_1,\\mu_2,\\mu_3)=(-1.10,0.15,1.25),\\quad q(\\theta)=\\sum_{j=1}^{3}q_j e^{-((\\theta-\\mu_j)/1.9)^2},\\quad f(\\theta)=e^{q(\\theta)},\\quad (x,y)=\\frac{(\\sinh\\theta,\\cosh\\theta)}{f(\\theta)},\\quad -\\infty\\lt\\theta\\lt\\infty,\\quad f>0,\\quad \\frac{d^2f}{d\\theta^2}-f\\lt0'
+  return `
+    <div class="indicatrix-details">
+      <section class="indicatrix-detail">
+        <span class="indicatrix-detail-label">${normed ? 'Unit circle' : 'Forward unit indicatrix'}</span>
+        <span class="indicatrix-detail-formula" data-katex="${unit}\\text{.}">${unit}.</span>
+      </section>
+    </div>
+  `
+}
+
+const indicatrixNoteMarkup = () => `
+  <div class="note-content">The Feuerbach geometry of normed planes was studied by <a href="https://faculty.washington.edu/moishe/branko/BG25%20Geometry%20of%20Minkowski%20planes.pdf" target="_blank" rel="noreferrer">Asplund and Grünbaum (1960)</a> and <a href="https://www.e-periodica.ch/digbib/view?pid=ens-001%3A2007%3A53%3A%3A273" target="_blank" rel="noreferrer">Martini and Spirova (2007)</a>.</div>
+`
 
 const atlasPresetOptions = () => (isParabolicMode(atlasState.mode)
   ? ['nhnegative', 'galilei', 'nhpositive'].flatMap((mode) => visiblePresetsForMode(mode as GeometryMode))
@@ -563,6 +590,14 @@ const atlasShell = () => {
         <summary>Data</summary>
         ${indicatrixDataMarkup()}
       </details>
+      <details class="advanced-panel details-panel">
+        <summary>Details</summary>
+        ${indicatrixDetailsMarkup()}
+      </details>
+      ${indicatrixState.mode === 'normed' ? `<details class="advanced-panel note-panel">
+        <summary>Note</summary>
+        ${indicatrixNoteMarkup()}
+      </details>` : ''}
   ` : `
       <details class="advanced-panel">
         <summary>Data</summary>
@@ -731,7 +766,7 @@ const currentLink = () => {
   if (activeView === 'indicatrix') {
     const state = new URLSearchParams({
       i: indicatrixState.mode,
-      p: indicatrixState.positions.join(','),
+      v: indicatrixState.vertices.flat().join(','),
       n: indicatrixState.normedShape.coefficients.join(','),
       l: indicatrixState.lorentzShape.coefficients.join(','),
       a: indicatrixState.similarity.translation.join(','),
@@ -894,9 +929,9 @@ const syncIndicatrixData = () => {
   if (activeView !== 'indicatrix') {
     return
   }
-  atlasApp.querySelectorAll<HTMLOutputElement>('[data-indicatrix-data-value]').forEach((output) => {
-    const index = Number(output.dataset.indicatrixDataValue)
-    output.textContent = indicatrixState.positions[index]!.toFixed(2)
+  atlasApp.querySelectorAll<HTMLInputElement>('[data-indicatrix-coordinate]').forEach((input) => {
+    const [vertexIndex, coordinateIndex] = coordinateIndices(input.dataset.indicatrixCoordinate!)
+    input.value = coordinateText(indicatrixState.vertices[vertexIndex]![coordinateIndex])
   })
 }
 
@@ -908,8 +943,8 @@ const syncIndicatrixNotice = () => {
   if (!notice) {
     return
   }
-  const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.positions, indicatrixState.normedShape, indicatrixState.lorentzShape)
-  notice.textContent = construction.valid ? '' : 'Choose three separated points on the indicatrix.'
+  const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
+  notice.textContent = construction.valid ? '' : 'Choose three separated points.'
 }
 
 const renderScene = () => {
@@ -918,7 +953,7 @@ const renderScene = () => {
     return
   }
   if (activeView === 'indicatrix') {
-    const rendered = renderIndicatrixViewport(svg, indicatrixState.mode, indicatrixState.positions, indicatrixState.normedShape, indicatrixState.lorentzShape, indicatrixState.overlays, indicatrixState.similarity, indicatrixCentroidTransformActive, indicatrixFixedBounds ?? undefined)
+    const rendered = renderIndicatrixViewport(svg, indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape, indicatrixState.overlays, indicatrixState.similarity, indicatrixCentroidTransformActive, indicatrixViewportBounds)
     indicatrixTransform = rendered.transform
     wireIndicatrixDrag(svg)
     syncIndicatrixData()
@@ -984,9 +1019,8 @@ const wireControls = () => {
       }
       activeView = 'indicatrix'
       if (indicatrixState.mode !== mode) {
-        indicatrixState.positions = indicatrixDefaultPositions(mode)
+        indicatrixState.vertices = indicatrixDefaultVertices(mode, indicatrixState.normedShape, indicatrixState.lorentzShape)
         indicatrixState.similarity = { translation: [0, 0], scale: 1 }
-        indicatrixFixedBounds = null
       }
       indicatrixState.mode = mode
       indicatrixCentroidTransformActive = false
@@ -1036,9 +1070,8 @@ const wireControls = () => {
     const mode = indicatrixState.mode
     indicatrixState = indicatrixInitialState()
     indicatrixState.mode = mode
-    indicatrixState.positions = indicatrixDefaultPositions(mode)
+    indicatrixState.vertices = indicatrixDefaultVertices(mode, indicatrixState.normedShape, indicatrixState.lorentzShape)
     indicatrixCentroidTransformActive = false
-    indicatrixFixedBounds = null
     atlasShell()
   })
   atlasApp.querySelectorAll<HTMLButtonElement>('[data-parabolic-preset]').forEach((button) => {
@@ -1112,18 +1145,15 @@ const wireControls = () => {
       renderScene()
     }
   })
-  atlasApp.querySelectorAll<HTMLInputElement>('[data-indicatrix-position]').forEach((input) => {
-    input.addEventListener('input', () => {
-      const index = Number(input.dataset.indicatrixPosition)
+  atlasApp.querySelectorAll<HTMLInputElement>('[data-indicatrix-coordinate]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const [index, coordinate] = coordinateIndices(input.dataset.indicatrixCoordinate!)
       const value = Number(input.value)
       if (!Number.isInteger(index) || index < 0 || index > 2 || !Number.isFinite(value)) {
+        syncIndicatrixData()
         return
       }
-      indicatrixState.positions[index] = value
-      const output = input.closest('.indicatrix-range')?.querySelector<HTMLOutputElement>('output')
-      if (output) {
-        output.textContent = value.toFixed(2)
-      }
+      indicatrixState.vertices[index]![coordinate] = value
       renderScene()
     })
   })
@@ -1159,7 +1189,6 @@ const wireControls = () => {
       indicatrixState.overlays[key] = input.checked
       if (key === 'centers' && !input.checked) {
         indicatrixCentroidTransformActive = false
-        indicatrixFixedBounds = null
       }
       renderScene()
     })
@@ -1233,18 +1262,6 @@ const canonicalIndicatrixPoint = ([x, y]: Vec2): Vec2 => [
   (y - indicatrixState.similarity.translation[1]) / indicatrixState.similarity.scale
 ]
 
-const syncIndicatrixPositionInputs = () => {
-  atlasApp.querySelectorAll<HTMLInputElement>('[data-indicatrix-position]').forEach((input) => {
-    const index = Number(input.dataset.indicatrixPosition)
-    const value = indicatrixState.positions[index]!
-    input.value = String(value)
-    const output = input.closest('.indicatrix-range')?.querySelector<HTMLOutputElement>('output')
-    if (output) {
-      output.textContent = value.toFixed(2)
-    }
-  })
-}
-
 const wireIndicatrixDrag = (svg: SVGSVGElement) => {
   if (wiredViewports.has(svg)) {
     return
@@ -1263,7 +1280,7 @@ const wireIndicatrixDrag = (svg: SVGSVGElement) => {
       event.preventDefault()
       return
     }
-    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.positions, indicatrixState.normedShape, indicatrixState.lorentzShape)
+    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
     const closest = construction.vertices.map((vertex, index) => {
       const screen = indicatrixTransform!.toScreen(displayIndicatrixPoint(vertex))
       return { index, distance: Math.hypot(screen[0] - pointer[0], screen[1] - pointer[1]) }
@@ -1293,10 +1310,13 @@ const wireIndicatrixDrag = (svg: SVGSVGElement) => {
       return
     }
     const target = canonicalIndicatrixPoint(indicatrixTransform.toWorld(pointerPosition(svg, event)))
-    indicatrixState.positions[dragIndex] = indicatrixState.mode === 'normed'
-      ? nearestNormedParameter(indicatrixState.normedShape, target)
-      : nearestLorentzFinslerParameter(indicatrixState.lorentzShape, target)
-    syncIndicatrixPositionInputs()
+    if (!target.every(Number.isFinite)) {
+      return
+    }
+    indicatrixState.vertices[dragIndex] = [
+      Math.max(-2.2, Math.min(2.2, target[0])),
+      Math.max(-1.54, Math.min(1.54, target[1]))
+    ]
     renderScene()
   })
   const stop = (event: PointerEvent) => {
@@ -1312,14 +1332,11 @@ const wireIndicatrixDrag = (svg: SVGSVGElement) => {
     if (!indicatrixState.overlays.centers || !indicatrixTransform) {
       return
     }
-    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.positions, indicatrixState.normedShape, indicatrixState.lorentzShape)
+    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
     const centroid = indicatrixTransform.toScreen(displayIndicatrixPoint(construction.centroid))
     const pointer = pointerPosition(svg, event)
     if (Math.hypot(centroid[0] - pointer[0], centroid[1] - pointer[1]) > 16) {
       return
-    }
-    if (!indicatrixCentroidTransformActive) {
-      indicatrixFixedBounds = { ...indicatrixTransform.bounds }
     }
     indicatrixCentroidTransformActive = !indicatrixCentroidTransformActive
     event.preventDefault()
@@ -1329,7 +1346,7 @@ const wireIndicatrixDrag = (svg: SVGSVGElement) => {
     if (!indicatrixCentroidTransformActive || !Number.isFinite(event.deltaY) || Math.abs(event.deltaY) <= 1e-12) {
       return
     }
-    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.positions, indicatrixState.normedShape, indicatrixState.lorentzShape)
+    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
     const factor = Math.exp(-Math.sign(event.deltaY) * 0.1)
     const previousScale = indicatrixState.similarity.scale
     const nextScale = Math.max(0.05, Math.min(20, previousScale * factor))
@@ -1572,6 +1589,7 @@ const hydrateLinkedState = () => {
   const state = new URLSearchParams(window.location.hash.slice(1))
   const indicatrixMode = state.get('i')
   if (indicatrixMode === 'normed' || indicatrixMode === 'lorentz-finsler') {
+    const vertices = state.get('v')?.split(',').map(Number)
     const positions = state.get('p')?.split(',').map(Number)
     const normed = state.get('n')?.split(',').map(Number)
     const lorentz = state.get('l')?.split(',').map(Number)
@@ -1580,16 +1598,21 @@ const hydrateLinkedState = () => {
     const overlays = state.get('o')
     activeView = 'indicatrix'
     indicatrixState.mode = indicatrixMode
-    if (positions?.length === 3 && positions.every(Number.isFinite)) {
-      indicatrixState.positions = indicatrixMode === 'normed'
-        ? positions.map((value) => ((value % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) as [number, number, number]
-        : positions.map((value) => Math.max(-1.65, Math.min(1.65, value))) as [number, number, number]
-    }
     if (normed?.length === 3 && normed.every(Number.isFinite)) {
       indicatrixState.normedShape = normalizeNormedShape(normed)
     }
     if (lorentz?.length === 3 && lorentz.every(Number.isFinite)) {
       indicatrixState.lorentzShape = normalizeLorentzFinslerShape(lorentz)
+    }
+    if (vertices?.length === 6 && vertices.every(Number.isFinite)) {
+      indicatrixState.vertices = [[vertices[0]!, vertices[1]!], [vertices[2]!, vertices[3]!], [vertices[4]!, vertices[5]!]]
+    } else if (positions?.length === 3 && positions.every(Number.isFinite)) {
+      const pointAt = indicatrixMode === 'normed'
+        ? (parameter: number) => normedIndicatrixPoint(indicatrixState.normedShape, parameter)
+        : (parameter: number) => lorentzFinslerIndicatrixPoint(indicatrixState.lorentzShape, parameter)
+      indicatrixState.vertices = positions.map(pointAt) as [Vec2, Vec2, Vec2]
+    } else {
+      indicatrixState.vertices = indicatrixDefaultVertices(indicatrixMode, indicatrixState.normedShape, indicatrixState.lorentzShape)
     }
     if (translation?.length === 2 && translation.every(Number.isFinite) && Number.isFinite(scale) && scale >= 0.05 && scale <= 20) {
       indicatrixState.similarity = { translation: [translation[0]!, translation[1]!], scale }

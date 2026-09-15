@@ -120,30 +120,144 @@ const triangleValid = (vertices: [Vec2, Vec2, Vec2]) => {
   return area > 0.015 && separation > 0.003
 }
 
-export const buildIndicatrixConstruction = (mode: IndicatrixMode, positions: [number, number, number], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, renderRapidity = lorentzRenderRapidity): IndicatrixConstruction => {
-  const base = mode === 'normed'
-    ? closedSamples((parameter) => normedIndicatrixPoint(normedShape, parameter))
-    : openSamples((parameter) => lorentzFinslerIndicatrixPoint(lorentzShape, parameter), renderRapidity, Math.max(501, 1 + Math.round(300 * renderRapidity)))
+const euclideanCircle = (vertices: [Vec2, Vec2, Vec2]) => {
+  const [a, b, c] = vertices
+  const denominator = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]))
+  if (Math.abs(denominator) <= 1e-10) {
+    const center = scale(1 / 3, sum(vertices))
+    const radius = Math.max(0.05, ...vertices.map((vertex) => Math.hypot(vertex[0] - center[0], vertex[1] - center[1])))
+    return { center, radius }
+  }
+  const squared = (point: Vec2) => point[0] * point[0] + point[1] * point[1]
+  const center: Vec2 = [
+    (squared(a) * (b[1] - c[1]) + squared(b) * (c[1] - a[1]) + squared(c) * (a[1] - b[1])) / denominator,
+    (squared(a) * (c[0] - b[0]) + squared(b) * (a[0] - c[0]) + squared(c) * (b[0] - a[0])) / denominator
+  ]
+  return { center, radius: Math.max(0.05, Math.hypot(a[0] - center[0], a[1] - center[1])) }
+}
+
+const solve = (matrix: number[][], vector: number[]) => {
+  const augmented = matrix.map((row, index) => [...row, vector[index]!])
+  for (let column = 0; column < vector.length; column += 1) {
+    let pivot = column
+    for (let row = column + 1; row < vector.length; row += 1) {
+      if (Math.abs(augmented[row]![column]!) > Math.abs(augmented[pivot]![column]!)) {
+        pivot = row
+      }
+    }
+    if (Math.abs(augmented[pivot]![column]!) <= 1e-12) {
+      return null
+    }
+    ;[augmented[column], augmented[pivot]] = [augmented[pivot]!, augmented[column]!]
+    const divisor = augmented[column]![column]!
+    for (let entry = column; entry <= vector.length; entry += 1) {
+      augmented[column]![entry]! /= divisor
+    }
+    for (let row = 0; row < vector.length; row += 1) {
+      if (row === column) {
+        continue
+      }
+      const factor = augmented[row]![column]!
+      for (let entry = column; entry <= vector.length; entry += 1) {
+        augmented[row]![entry]! -= factor * augmented[column]![entry]!
+      }
+    }
+  }
+  return augmented.map((row) => row[vector.length]!)
+}
+
+const wrapAngle = (value: number) => ((value % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+
+const fitCircumIndicatrix = (mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape) => {
+  const initial = euclideanCircle(vertices)
   const pointAt = mode === 'normed'
     ? (parameter: number) => normedIndicatrixPoint(normedShape, parameter)
     : (parameter: number) => lorentzFinslerIndicatrixPoint(lorentzShape, parameter)
-  const vertices = positions.map(pointAt) as [Vec2, Vec2, Vec2]
+  const parameterAt = mode === 'normed'
+    ? (point: Vec2) => nearestNormedParameter(normedShape, point)
+    : (point: Vec2) => nearestLorentzFinslerParameter(lorentzShape, point)
+  const normalize = (parameter: number) => mode === 'normed' ? wrapAngle(parameter) : Math.max(-4, Math.min(4, parameter))
+  let values = [initial.center[0], initial.center[1], Math.log(initial.radius), ...vertices.map((vertex) => parameterAt(scale(1 / initial.radius, subtract(vertex, initial.center))))]
+  const evaluate = (candidate: number[]) => vertices.flatMap((vertex, index) => {
+    const unit = pointAt(candidate[index + 3]!)
+    const radius = Math.exp(candidate[2]!)
+    return [candidate[0]! + radius * unit[0] - vertex[0], candidate[1]! + radius * unit[1] - vertex[1]]
+  })
+  let residuals = evaluate(values)
+  let norm = Math.hypot(...residuals)
+  for (let iteration = 0; iteration < 48 && norm > 1e-9; iteration += 1) {
+    const jacobian = Array.from({ length: 6 }, () => Array(6).fill(0))
+    const radius = Math.exp(values[2]!)
+    vertices.forEach((_, index) => {
+      const unit = pointAt(values[index + 3]!)
+      const step = 1e-5
+      const before = pointAt(values[index + 3]! - step)
+      const after = pointAt(values[index + 3]! + step)
+      const derivative: Vec2 = [(after[0] - before[0]) / (2 * step), (after[1] - before[1]) / (2 * step)]
+      const row = 2 * index
+      jacobian[row]![0] = 1
+      jacobian[row + 1]![1] = 1
+      jacobian[row]![2] = radius * unit[0]
+      jacobian[row + 1]![2] = radius * unit[1]
+      jacobian[row]![index + 3] = radius * derivative[0]
+      jacobian[row + 1]![index + 3] = radius * derivative[1]
+    })
+    const normal = Array.from({ length: 6 }, (_, row) => Array.from({ length: 6 }, (_, column) => jacobian.reduce((total, current) => total + current[row]! * current[column]!, row === column ? 1e-8 : 0)))
+    const right = Array.from({ length: 6 }, (_, column) => -jacobian.reduce((total, row, index) => total + row[column]! * residuals[index]!, 0))
+    const delta = solve(normal, right)
+    if (!delta) {
+      break
+    }
+    let accepted = false
+    for (const factor of [1, 0.5, 0.25, 0.125, 0.0625]) {
+      const candidate = values.map((value, index) => value + factor * delta[index]!)
+      candidate[2] = Math.max(Math.log(0.02), Math.min(Math.log(20), candidate[2]!))
+      for (let index = 3; index < 6; index += 1) {
+        candidate[index] = normalize(candidate[index]!)
+      }
+      const candidateResiduals = evaluate(candidate)
+      const candidateNorm = Math.hypot(...candidateResiduals)
+      if (candidateNorm < norm) {
+        values = candidate
+        residuals = candidateResiduals
+        norm = candidateNorm
+        accepted = true
+        break
+      }
+    }
+    if (!accepted) {
+      break
+    }
+  }
+  return {
+    center: [values[0]!, values[1]!] as Vec2,
+    radius: Math.exp(values[2]!),
+    parameters: [values[3]!, values[4]!, values[5]!] as [number, number, number],
+    valid: Number.isFinite(norm) && norm <= 1e-5
+  }
+}
+
+export const buildIndicatrixConstruction = (mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, renderRapidity = lorentzRenderRapidity): IndicatrixConstruction => {
+  const base = mode === 'normed'
+    ? closedSamples((parameter) => normedIndicatrixPoint(normedShape, parameter))
+    : openSamples((parameter) => lorentzFinslerIndicatrixPoint(lorentzShape, parameter), renderRapidity, Math.max(501, 1 + Math.round(300 * renderRapidity)))
+  const fit = fitCircumIndicatrix(mode, vertices, normedShape, lorentzShape)
   const [a, b, c] = vertices
-  const origin: Vec2 = [0, 0]
-  const orthocenter = sum(vertices)
-  const centroid = scale(1 / 3, orthocenter)
-  const feuerbachCenter = scale(0.5, orthocenter)
-  const translatedCenters: [Vec2, Vec2, Vec2] = [add(b, c), add(c, a), add(a, b)]
-  const translatedIndicatrices = translatedCenters.map((center) => translateSamples(base, center)) as [Vec2[], Vec2[], Vec2[]]
+  const origin = fit.center
+  const orthocenter = subtract(sum(vertices), scale(2, origin))
+  const centroid = scale(1 / 3, sum(vertices))
+  const feuerbachCenter = mean(origin, orthocenter)
+  const translatedCenters: [Vec2, Vec2, Vec2] = [add(origin, subtract(orthocenter, a)), add(origin, subtract(orthocenter, b)), add(origin, subtract(orthocenter, c))]
+  const translatedIndicatrices = translatedCenters.map((center) => translateSamples(base, center, fit.radius)) as [Vec2[], Vec2[], Vec2[]]
   const sideMidpoints: [Vec2, Vec2, Vec2] = [mean(b, c), mean(c, a), mean(a, b)]
   const vertexOrthocenterMidpoints: [Vec2, Vec2, Vec2] = [mean(a, orthocenter), mean(b, orthocenter), mean(c, orthocenter)]
   const feuBranches = mode === 'normed'
-    ? [translateSamples(base, feuerbachCenter, 0.5)]
-    : [translateSamples(base, feuerbachCenter, 0.5), translateSamples(base, feuerbachCenter, -0.5)]
+    ? [translateSamples(base, feuerbachCenter, 0.5 * fit.radius)]
+    : [translateSamples(base, feuerbachCenter, 0.5 * fit.radius), translateSamples(base, feuerbachCenter, -0.5 * fit.radius)]
   return {
     mode,
     vertices,
-    circumIndicatrix: base,
+    circumIndicatrix: translateSamples(base, origin, fit.radius),
     translatedCenters,
     translatedIndicatrices,
     feuBranches,
@@ -153,7 +267,7 @@ export const buildIndicatrixConstruction = (mode: IndicatrixMode, positions: [nu
     feuerbachCenter,
     sideMidpoints,
     vertexOrthocenterMidpoints,
-    valid: triangleValid(vertices)
+    valid: triangleValid(vertices) && fit.valid
   }
 }
 

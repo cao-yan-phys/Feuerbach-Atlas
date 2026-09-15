@@ -5,6 +5,7 @@ import type { Vec2 } from '../src/math/types'
 const subtract = (first: Vec2, second: Vec2): Vec2 => [first[0] - second[0], first[1] - second[1]]
 const add = (first: Vec2, second: Vec2): Vec2 => [first[0] + second[0], first[1] + second[1]]
 const scale = (factor: number, point: Vec2): Vec2 => [factor * point[0], factor * point[1]]
+const mean = (first: Vec2, second: Vec2): Vec2 => scale(0.5, add(first, second))
 
 const expectPoint = (actual: Vec2, expected: Vec2, precision = 10) => {
   expect(actual[0]).toBeCloseTo(expected[0], precision)
@@ -68,18 +69,17 @@ describe('indicatrix kernel', () => {
   it('preserves every normed-plane affine and six-point identity', () => {
     Array.from({ length: 6 }, (_, trial) => {
       const shape = normalizeNormedShape([0.18 * Math.sin(trial + 1), -0.14 * Math.cos(trial + 1), 0.06 * Math.sin(2 * trial + 1)])
-      const positions: [number, number, number] = [0.2 + 0.08 * trial, 2.3 + 0.05 * trial, 4.45 - 0.06 * trial]
-      const state = buildIndicatrixConstruction('normed', positions, shape, normalizeLorentzFinslerShape([0, 0, 0]))
+      const vertices = [0.2 + 0.08 * trial, 2.3 + 0.05 * trial, 4.45 - 0.06 * trial].map((parameter) => normedIndicatrixPoint(shape, parameter)) as [Vec2, Vec2, Vec2]
+      const state = buildIndicatrixConstruction('normed', vertices, shape, normalizeLorentzFinslerShape([0, 0, 0]))
       const [a, b, c] = state.vertices
-      expectPoint(state.orthocenter, add(add(a, b), c))
-      expectPoint(scale(3, state.centroid), state.orthocenter)
-      expectPoint(scale(2, state.feuerbachCenter), state.orthocenter)
+      expectPoint(state.orthocenter, subtract(add(add(a, b), c), scale(2, state.origin)))
+      expectPoint(scale(3, state.centroid), add(add(a, b), c))
+      expectPoint(state.feuerbachCenter, mean(state.origin, state.orthocenter))
       state.vertices.forEach((vertex, index) => {
-        const translatedCenter = [add(b, c), add(c, a), add(a, b)][index]!
-        expectPoint(subtract(state.orthocenter, translatedCenter), vertex)
-        expectPoint(state.vertexOrthocenterMidpoints[index]!, add(state.feuerbachCenter, scale(0.5, vertex)))
-        expectPoint(state.sideMidpoints[index]!, add(state.feuerbachCenter, scale(-0.5, vertex)))
-        expectPoint(state.sideMidpoints[index]!, add(state.feuerbachCenter, scale(0.5, normedIndicatrixPoint(shape, positions[index]! + Math.PI))))
+        const translatedCenter = [add(state.origin, subtract(state.orthocenter, a)), add(state.origin, subtract(state.orthocenter, b)), add(state.origin, subtract(state.orthocenter, c))][index]!
+        expectPoint(subtract(state.orthocenter, translatedCenter), subtract(vertex, state.origin))
+        expectPoint(state.vertexOrthocenterMidpoints[index]!, mean(vertex, state.orthocenter))
+        expectPoint(state.sideMidpoints[index]!, mean([a, b, c][(index + 1) % 3]!, [a, b, c][(index + 2) % 3]!))
       })
       expect(state.valid).toBe(true)
     })
@@ -88,22 +88,37 @@ describe('indicatrix kernel', () => {
   it('preserves the Lorentz–Finsler forward and reflected three-point split', () => {
     Array.from({ length: 6 }, (_, trial) => {
       const shape = normalizeLorentzFinslerShape([0.22 * Math.sin(trial + 1), -0.18 * Math.cos(trial + 1), 0.14 * Math.sin(2 * trial + 1)])
-      const positions: [number, number, number] = [-0.8 + 0.04 * trial, 0.1 - 0.03 * trial, 0.9 - 0.02 * trial]
-      const state = buildIndicatrixConstruction('lorentz-finsler', positions, normalizeNormedShape([0, 0, 0]), shape)
+      const vertices = [-0.8 + 0.04 * trial, 0.1 - 0.03 * trial, 0.9 - 0.02 * trial].map((parameter) => lorentzFinslerIndicatrixPoint(shape, parameter)) as [Vec2, Vec2, Vec2]
+      const state = buildIndicatrixConstruction('lorentz-finsler', vertices, normalizeNormedShape([0, 0, 0]), shape)
       const [a, b, c] = state.vertices
       state.vertices.forEach((_, index) => {
-        const translatedCenter = [add(b, c), add(c, a), add(a, b)][index]!
-        const indicatrix = lorentzFinslerIndicatrixPoint(shape, positions[index]!)
-        expectPoint(subtract(state.orthocenter, translatedCenter), indicatrix)
-        expectPoint(state.vertexOrthocenterMidpoints[index]!, add(state.feuerbachCenter, scale(0.5, indicatrix)))
-        expectPoint(state.sideMidpoints[index]!, add(state.feuerbachCenter, scale(-0.5, indicatrix)))
+        const translatedCenter = [add(state.origin, subtract(state.orthocenter, a)), add(state.origin, subtract(state.orthocenter, b)), add(state.origin, subtract(state.orthocenter, c))][index]!
+        expectPoint(subtract(state.orthocenter, translatedCenter), subtract(vertices[index]!, state.origin))
+        expectPoint(state.vertexOrthocenterMidpoints[index]!, mean(vertices[index]!, state.orthocenter))
+        expectPoint(state.sideMidpoints[index]!, mean([a, b, c][(index + 1) % 3]!, [a, b, c][(index + 2) % 3]!))
       })
       expect(state.valid).toBe(true)
     })
   })
 
+  it('fits a translated scaled circum-indicatrix through free normed-plane vertices', () => {
+    const shape = normalizeNormedShape([0.14, -0.09, 0.04])
+    const vertices: [Vec2, Vec2, Vec2] = [[-0.88, -0.46], [0.72, -0.15], [0.18, 0.94]]
+    const state = buildIndicatrixConstruction('normed', vertices, shape, normalizeLorentzFinslerShape([0, 0, 0]))
+    expect(state.valid).toBe(true)
+    vertices.forEach((vertex) => {
+      const distance = Math.min(...state.circumIndicatrix.map((point) => Math.hypot(point[0] - vertex[0], point[1] - vertex[1])))
+      expect(distance).toBeLessThan(0.02)
+    })
+    state.translatedCenters.forEach((center, index) => {
+      expectPoint(subtract(state.orthocenter, center), subtract(vertices[index]!, state.origin), 7)
+    })
+  })
+
   it('samples unbounded Lorentz branches beyond the finite construction', () => {
-    const state = buildIndicatrixConstruction('lorentz-finsler', [-0.8, 0.1, 0.9], normalizeNormedShape([0, 0, 0]), normalizeLorentzFinslerShape([0.22, -0.16, 0.12]))
+    const shape = normalizeLorentzFinslerShape([0.22, -0.16, 0.12])
+    const vertices = [-0.8, 0.1, 0.9].map((parameter) => lorentzFinslerIndicatrixPoint(shape, parameter)) as [Vec2, Vec2, Vec2]
+    const state = buildIndicatrixConstruction('lorentz-finsler', vertices, normalizeNormedShape([0, 0, 0]), shape)
     const finiteReach = Math.max(1, ...[
       ...state.vertices,
       state.origin,
@@ -119,7 +134,8 @@ describe('indicatrix kernel', () => {
   })
 
   it('retains the indicatrix while rejecting derived data for a degenerate triangle', () => {
-    const state = buildIndicatrixConstruction('normed', [0.2, 0.2, 0.2], normalizeNormedShape([0.1, 0, 0]), normalizeLorentzFinslerShape([0, 0, 0]))
+    const vertex = normedIndicatrixPoint(normalizeNormedShape([0.1, 0, 0]), 0.2)
+    const state = buildIndicatrixConstruction('normed', [vertex, vertex, vertex], normalizeNormedShape([0.1, 0, 0]), normalizeLorentzFinslerShape([0, 0, 0]))
     expect(state.circumIndicatrix).toHaveLength(512)
     expect(state.valid).toBe(false)
   })
