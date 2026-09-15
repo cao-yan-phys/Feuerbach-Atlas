@@ -891,19 +891,19 @@ const drawParabolicFunction = (root: SVGElement, kappa: number, parameters: Para
   })
 }
 
-const drawParabolicFiber = (root: SVGElement, parameters: ParabolicParameters, time: number, transform: ViewportTransform, kappa: number, chart: ParabolicChart, view: ParabolicView) => {
+const drawParabolicFiber = (root: SVGElement, parameters: ParabolicParameters, time: number, transform: ViewportTransform, kappa: number, chart: ParabolicChart, view: ParabolicView, className: string) => {
   if (chart === 'beltrami') {
     const point = parabolicDisplayPoint(kappa, [parameters.anchor[0] + time, 0], chart, view)
     if (point) {
       const ends: [Vec2, Vec2] = view === 'carroll'
         ? [[point[0], transform.bounds.minY], [point[0], transform.bounds.maxY]]
         : [[transform.bounds.minX, point[1]], [transform.bounds.maxX, point[1]]]
-      drawPolyline(root, ends, transform, 'parabolic-fiber')
+      drawPolyline(root, ends, transform, className)
     }
     return
   }
   const x = parameters.anchor[0] + time
-  drawPolyline(root, [[x, transform.bounds.minY], [x, transform.bounds.maxY]], transform, 'parabolic-fiber')
+  drawPolyline(root, [[x, transform.bounds.minY], [x, transform.bounds.maxY]], transform, className)
 }
 
 const drawParabolicBeltramiBoundary = (root: SVGElement, kappa: number, transform: ViewportTransform, chart: ParabolicChart, view: ParabolicView) => {
@@ -951,7 +951,7 @@ const drawParabolic = (root: SVGElement, vertices: [Vec2, Vec2, Vec2], transform
   }
   drawParabolicBeltramiBoundary(root, kappa, transform, chart, view)
   if (overlays.singularBranches) {
-    state.fibers.forEach((time) => drawParabolicFiber(root, parameters, time, transform, kappa, chart, view))
+    state.fibers.forEach((time, index) => drawParabolicFiber(root, parameters, time, transform, kappa, chart, view, `parabolic-fiber ${indexedClass('altitude', index)}`))
   }
   if (overlays.euler) {
     drawParabolicFunction(root, kappa, parameters, (time) => parabolicCycleValue(state.euler!, kappa, time), transform, chart, view, 'cycle-euler')
@@ -972,18 +972,6 @@ const drawParabolic = (root: SVGElement, vertices: [Vec2, Vec2, Vec2], transform
       }
     })
   }
-  if (overlays.altitudes) {
-    state.secondIntersections.forEach((intersection, index) => {
-      if (intersection) {
-        const source = [[0, 0], [parameters.u, parameters.p], [parameters.w, parameters.q]][index]! as Vec2
-        const line = parabolicLineThrough(kappa, source, [intersection.T, intersection.y])
-        if (line) {
-          const centerTime = state.pseudoaltitudeCenter?.T
-          drawParabolicFunction(root, kappa, parameters, (time) => parabolicSideValue(line, kappa, time), transform, chart, view, indexedClass('altitude', index), Math.min(source[0], intersection.T, centerTime ?? source[0]), Math.max(source[0], intersection.T, centerTime ?? source[0]))
-        }
-      }
-    })
-  }
   state.sides.forEach((side, index) => {
     const endpoints: Array<[number, number]> = [[parameters.u, parameters.w], [parameters.w, 0], [0, parameters.u]]
     const [from, to] = endpoints[index]!
@@ -993,14 +981,11 @@ const drawParabolic = (root: SVGElement, vertices: [Vec2, Vec2, Vec2], transform
     if (state.pseudomedianCenter) {
       drawParabolicMarker(canonicalToRawParabolic([state.pseudomedianCenter.T, state.pseudomedianCenter.y], parameters, kappa), 'area-bisector-center-marker', 3.5)
     }
-    if (state.pseudoaltitudeCenter) {
-      drawParabolicMarker(canonicalToRawParabolic([state.pseudoaltitudeCenter.T, state.pseudoaltitudeCenter.y], parameters, kappa), 'altitude-center-marker', 3.5)
-    }
   }
   if (overlays.bisectors) {
     state.feet.forEach((foot, index) => drawParabolicMarker(canonicalToRawParabolic([foot.T, foot.y], parameters, kappa), indexedClass('foot-marker', index), 3))
   }
-  if (overlays.altitudes) {
+  if (overlays.singularBranches) {
     state.secondIntersections.forEach((point, index) => {
       if (point) {
         drawParabolicMarker(canonicalToRawParabolic([point.T, point.y], parameters, kappa), indexedClass('altitude-marker', index), 3)

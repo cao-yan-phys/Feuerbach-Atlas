@@ -43,7 +43,6 @@ export interface ParabolicState {
   feet: [ParabolicPoint, ParabolicPoint, ParabolicPoint] | null
   secondIntersections: [ParabolicPoint | null, ParabolicPoint | null, ParabolicPoint | null]
   pseudomedianCenter: ParabolicPoint | null
-  pseudoaltitudeCenter: ParabolicPoint | null
   euler: ParabolicCycle | null
   tangent: ParabolicCycle | null
   contact: ParabolicPoint | null
@@ -192,22 +191,36 @@ export const parabolicLineThrough = (kappa: number, first: Vec2, second: Vec2): 
   }
 }
 
-const pointFromVector = (kappa: number, vector: Vec3): ParabolicPoint | null => {
+const pointFromVector = (kappa: number, vector: Vec3, referenceTime?: number): ParabolicPoint | null => {
   const quadric = vector[0] * vector[0] - kappa * vector[2] * vector[2]
   if (!(quadric > tolerance)) {
     return null
   }
-  const sign = vector[0] < 0 ? -1 : 1
-  const normalized = vector.map((value) => sign * value / Math.sqrt(quadric)) as Vec3
+  const normalized = vector.map((value) => value / Math.sqrt(quadric)) as Vec3
   let T: number
+  let y: number
   if (kappa > tolerance) {
-    T = Math.asinh(Math.sqrt(kappa) * normalized[2]) / Math.sqrt(kappa)
+    const sign = normalized[0] < 0 ? -1 : 1
+    T = Math.asinh(Math.sqrt(kappa) * sign * normalized[2]) / Math.sqrt(kappa)
+    y = sign * normalized[1]
   } else if (kappa < -tolerance) {
-    T = Math.atan2(Math.sqrt(-kappa) * normalized[2], normalized[0]) / Math.sqrt(-kappa)
+    const root = Math.sqrt(-kappa)
+    const period = 2 * Math.PI / root
+    const candidates = [1, -1].map((sign) => {
+      const base = Math.atan2(sign * root * normalized[2], sign * normalized[0]) / root
+      const time = Number.isFinite(referenceTime) ? base + period * Math.round((referenceTime! - base) / period) : base
+      return { time, y: sign * normalized[1] }
+    })
+    const chosen = Number.isFinite(referenceTime)
+      ? candidates.reduce((best, candidate) => Math.abs(candidate.time - referenceTime!) < Math.abs(best.time - referenceTime!) ? candidate : best)
+      : candidates[normalized[0] < 0 ? 1 : 0]!
+    T = chosen.time
+    y = chosen.y
   } else {
-    T = normalized[2]
+    T = normalized[2] / normalized[0]
+    y = normalized[1] / normalized[0]
   }
-  return Number.isFinite(T) && Number.isFinite(normalized[1]) ? { T, y: normalized[1], vector: normalized } : null
+  return Number.isFinite(T) && Number.isFinite(y) ? { T, y, vector: parabolicVector(kappa, [T, y]) } : null
 }
 
 const pointAt = (kappa: number, time: number, y: number): ParabolicPoint => ({ T: time, y, vector: parabolicVector(kappa, [time, y]) })
@@ -277,7 +290,6 @@ export const buildParabolicState = (kappa: number, vertices: [Vec2, Vec2, Vec2])
     feet: null,
     secondIntersections: [null, null, null],
     pseudomedianCenter: null,
-    pseudoaltitudeCenter: null,
     euler: null,
     tangent: null,
     contact: null,
@@ -318,7 +330,8 @@ export const buildParabolicState = (kappa: number, vertices: [Vec2, Vec2, Vec2])
     combination(z * (x + y * z), vectors[2], x * (z + x * y), vectors[0], y * (z * z + x * x + 2 * x * y * z)),
     combination(x * (y + x * z), vectors[0], y * (x + y * z), vectors[1], z * (x * x + y * y + 2 * x * y * z))
   ]
-  const feet = feetVectors.map((vector) => pointFromVector(kappa, vector)) as [ParabolicPoint | null, ParabolicPoint | null, ParabolicPoint | null]
+  const footReferences = [(u + w) / 2, w / 2, u / 2]
+  const feet = feetVectors.map((vector, index) => pointFromVector(kappa, vector, footReferences[index])) as [ParabolicPoint | null, ParabolicPoint | null, ParabolicPoint | null]
   if (!feet[0] || !feet[1] || !feet[2]) {
     return invalid('pseudomedian foot is ideal')
   }
@@ -377,10 +390,6 @@ export const buildParabolicState = (kappa: number, vertices: [Vec2, Vec2, Vec2])
     const time = timeHalf === null ? null : 2 * timeHalf
     return time === null || !Number.isFinite(time) ? null : pointAt(kappa, time, parabolicSideValue(side, kappa, time))
   }) as [ParabolicPoint | null, ParabolicPoint | null, ParabolicPoint | null]
-  const pseudoaltitudeLines = vectors.map((vertex, index) => secondIntersections[index] ? cross3(vertex, secondIntersections[index]!.vector) : null) as [Vec3 | null, Vec3 | null, Vec3 | null]
-  const pseudoaltitude = pseudoaltitudeLines[0] && pseudoaltitudeLines[1]
-    ? projectiveIntersection(kappa, pseudoaltitudeLines[0], pseudoaltitudeLines[1], pseudoaltitudeLines[2] ?? undefined)
-    : { point: null, residual: Number.POSITIVE_INFINITY }
   const FC = p * (r + s) * (1 + kappa * r * s) / (r * (1 - kappa * s * s))
   const area = parabolicArea(kappa, [0, 0], [u, p], [w, q])
   const footArea = validFeet.map((foot, index) => {
@@ -397,7 +406,6 @@ export const buildParabolicState = (kappa: number, vertices: [Vec2, Vec2, Vec2])
     eulerU: Math.abs(parabolicCycleValue(eulerStable, kappa, u) - FB),
     eulerW: Math.abs(parabolicCycleValue(eulerStable, kappa, w) - FC),
     pseudomedian: pseudomedian.residual,
-    pseudoaltitude: pseudoaltitude.residual,
     bisection: Math.max(...footArea),
     contact: contactTime === null ? Number.POSITIVE_INFINITY : Math.abs(parabolicCycleValue(eulerStable, kappa, contactTime) - parabolicCycleValue(tangent, kappa, contactTime)),
     derivative: contactTime === null ? Number.POSITIVE_INFINITY : Math.abs(parabolicCycleDerivative(eulerStable, kappa, contactTime) - parabolicCycleDerivative(tangent, kappa, contactTime))
@@ -417,7 +425,6 @@ export const buildParabolicState = (kappa: number, vertices: [Vec2, Vec2, Vec2])
     feet: validFeet,
     secondIntersections,
     pseudomedianCenter: pseudomedian.point,
-    pseudoaltitudeCenter: pseudoaltitude.point,
     euler: eulerStable,
     tangent,
     contact,

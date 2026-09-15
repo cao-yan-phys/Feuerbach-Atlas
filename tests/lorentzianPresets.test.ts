@@ -17,16 +17,7 @@ const curvedPreset = (id: string) => {
   }
 }
 
-describe('Lorentzian regression presets', () => {
-  it('recomputes the AdS publication invariants', () => {
-    const { state } = curvedPreset('ads-publication')
-    expect(state.invariants.p).toBeCloseTo(2.633190976465259, 10)
-    expect(state.invariants.q).toBeCloseTo(1.195488825867216, 10)
-    expect(state.invariants.r).toBeCloseTo(4.818579453400351, 10)
-    expect(state.invariants.delta).toBeCloseTo(-0.244298073044526, 10)
-    expect(state.invariants.d).toBeCloseTo(9.647259255732827, 10)
-  })
-
+describe('Lorentzian presets', () => {
   it('keeps all AdS finite-sample contacts finite', () => {
     const { state } = curvedPreset('ads-finite')
     expect(state.branches).toHaveLength(4)

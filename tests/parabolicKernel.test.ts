@@ -125,6 +125,7 @@ describe('parabolic Cayley–Klein kernel', () => {
       state.secondIntersections.forEach((point, index) => {
         expect(parabolicCycleValue(state.euler!, kappa, point!.T)).toBeCloseTo(point!.y, 9)
         expect(parabolicSideValue(state.sides[index]!, kappa, point!.T)).toBeCloseTo(point!.y, 9)
+        expect(point!.T).toBeCloseTo([0, state.parameters.u, state.parameters.w][index]!, 9)
         expect(Math.abs(point!.T - state.feet![index]!.T)).toBeGreaterThan(1e-4)
       })
     })

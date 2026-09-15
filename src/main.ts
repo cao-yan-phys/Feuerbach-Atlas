@@ -407,7 +407,7 @@ const overlayControls = () => {
   const parabolic = isParabolicMode(atlasState.mode)
   const flat = atlasState.mode === 'euclidean' || atlasState.mode === 'minkowski'
   const labels: Array<[keyof Overlays, string]> = parabolic
-    ? [['bisectors', 'Area bisectors'], ['euler', 'Euler cycle'], ['altitudes', 'Pseudoaltitudes'], ['tangent', 'Tangent cycle'], ['centers', 'Centers']]
+    ? [['bisectors', 'Area bisectors'], ['euler', 'Euler cycle'], ['tangent', 'Tangent cycle'], ['centers', 'Centers']]
     : flat
     ? [['bisectors', 'Medians'], ['euler', 'Nine-point circle'], ['altitudes', 'Altitudes'], ['tangent', 'Tangent cycles'], ['circumcircle', 'Circumcircle'], ['centers', 'Centers']]
     : [['bisectors', 'Area bisectors'], ['euler', 'Euler cycle'], ['altitudes', 'Pseudoaltitudes'], ['tangent', 'Tangent cycles'], ['centers', 'Centers']]
@@ -422,7 +422,7 @@ const overlayControls = () => {
       ${atlasState.overlays.homothety ? `<input class="homothety-progress" type="range" min="0" max="1" step="0.01" value="${atlasState.homothetyProgress}" data-homothety-progress aria-label="Homothety progress" />` : ''}
     </div>
   ` : ''
-  const parabolicControls: Array<[keyof Overlays, string]> = parabolic ? [['singularBranches', 'Singular fibers']] : []
+  const parabolicControls: Array<[keyof Overlays, string]> = parabolic ? [['singularBranches', 'Pseudoaltitudes']] : []
   const controls = [...labels, ...euclideanCircumcircleControl, ...minkowskiCircumcircleControl].map(([key, label]) => overlayControl(key, label)).join('')
   const trailingControls = [...nullControls, ...horizonControls, ...parabolicControls, ['grid', 'Grid'] as [keyof Overlays, string]].map(([key, label]) => overlayControl(key, label)).join('')
   return `${controls}${homothetyControl}${trailingControls}`
