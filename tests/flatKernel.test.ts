@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFlatState, classifyMinkowskiTriangle, euclideanCircumcircle, flatCycleContact, flatCycleHomothety, minkowskiCircumcycle } from '../src/math/flatKernel'
+import { buildFlatState, classifyMinkowskiTriangle, euclideanCircumcircle, flatCycleContact, minkowskiCircumcycle } from '../src/math/flatKernel'
 
 const maxResidual = (values: Record<string, number>) => Math.max(...Object.values(values))
 
@@ -49,7 +49,7 @@ describe('flat kernel', () => {
     expect(Math.max(...values) - Math.min(...values)).toBeLessThan(1e-10)
   })
 
-  it('derives Feuerbach homotheties in Euclidean and Minkowski modes', () => {
+  it('relates the circumcycle and Euler cycle by the two nine-point homotheties', () => {
     const cases: Array<[1 | -1, [[number, number], [number, number], [number, number]]]> = [
       [1 as const, [[-1.2, -0.6], [1.2, -0.4], [-0.2, 1.1]] as [[number, number], [number, number], [number, number]]],
       [-1 as const, [[-1.8, -0.15], [0.35, 0.25], [1.2, -0.35]] as [[number, number], [number, number], [number, number]]]
@@ -57,15 +57,22 @@ describe('flat kernel', () => {
 
     cases.forEach(([sigma, vertices]) => {
       const state = buildFlatState(sigma, vertices)
-      state.tangentCycles.forEach((cycle, index) => {
-        const homothety = flatCycleHomothety(state.ninePoint!, cycle, state.contacts[index]!)
-        expect(homothety).not.toBeNull()
-        const center = homothety!.center
-        const scale = homothety!.scale
-        expect(center).toEqual(state.contacts[index]!.point)
-        expect(center[0] + scale * (state.ninePoint!.center[0] - center[0])).toBeCloseTo(cycle.center[0], 9)
-        expect(center[1] + scale * (state.ninePoint!.center[1] - center[1])).toBeCloseTo(cycle.center[1], 9)
-        expect(scale * scale * state.ninePoint!.radiusSquared).toBeCloseTo(cycle.radiusSquared, 9)
+      const circumcircle = state.circumcircle!
+      const euler = state.ninePoint!
+      const cases = [
+        { center: state.orthocenter!, scale: 0.5, points: vertices.map((point) => [(point[0] + state.orthocenter![0]) / 2, (point[1] + state.orthocenter![1]) / 2] as [number, number]) },
+        { center: state.centroid, scale: -0.5, points: state.midpoints }
+      ]
+      cases.forEach(({ center, scale, points }) => {
+        expect(center[0] + scale * (circumcircle.center[0] - center[0])).toBeCloseTo(euler.center[0], 9)
+        expect(center[1] + scale * (circumcircle.center[1] - center[1])).toBeCloseTo(euler.center[1], 9)
+        expect(scale * scale * circumcircle.radiusSquared).toBeCloseTo(euler.radiusSquared, 9)
+        points.forEach((point) => {
+          const value = sigma === 1
+            ? (point[0] - euler.center[0]) ** 2 + (point[1] - euler.center[1]) ** 2
+            : (point[0] - euler.center[0]) ** 2 - (point[1] - euler.center[1]) ** 2
+          expect(value).toBeCloseTo(euler.radiusSquared, 9)
+        })
       })
     })
   })

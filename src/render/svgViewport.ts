@@ -1,7 +1,7 @@
 import { hyperbolicProject, lorentzProjectiveProject, sphereProject } from '../geometry/charts'
 import { boundsForMode, curvedDomain, isCurvedMode, liftForMode, metricForMode } from '../geometry/modes'
 import { buildCurvedState, sampleGeodesic } from '../math/curvedKernel'
-import { buildFlatState, euclideanCircumcircle, flatCycleHomothety, minkowskiCircumcycle } from '../math/flatKernel'
+import { buildFlatState, euclideanCircumcircle, minkowskiCircumcycle } from '../math/flatKernel'
 import { bilinear2, bilinear3, scale3 } from '../math/linalg'
 import { buildParabolicState, canonicalToRawParabolic, isParabolicMode, parabolicCycleValue, parabolicDisplayPoint, parabolicLineThrough, parabolicSideValue, type ParabolicChart, type ParabolicParameters, type ParabolicView } from '../math/parabolicKernel'
 import type { FlatCycle, GeometryMode, Vec2, Vec3 } from '../math/types'
@@ -30,6 +30,8 @@ export interface Overlays {
   grid: boolean
   singularBranches: boolean
 }
+
+export type NinePointHomothety = 'euler' | 'medial'
 
 export interface ViewportTransform {
   bounds: Bounds
@@ -361,15 +363,35 @@ const drawFlatCycle = (root: SVGElement, sigma: 1 | -1, cycle: FlatCycle, transf
   }, transform, className)
 }
 
-const drawFlatHomothety = (root: SVGElement, sigma: 1 | -1, first: FlatCycle, center: Vec2, scale: number, progress: number, transform: ViewportTransform, className: string) => {
-  const imageScale = 1 + progress * (scale - 1)
-  if (Math.abs(imageScale) > 1e-10) {
+const homothetyScaleAt = (scale: number, progress: number) => 1 + progress * (scale - 1)
+
+const homotheticVertices = (vertices: [Vec2, Vec2, Vec2], center: Vec2, scale: number, progress: number) => {
+  const imageScale = homothetyScaleAt(scale, progress)
+  return vertices.map((vertex) => [
+    center[0] + imageScale * (vertex[0] - center[0]),
+    center[1] + imageScale * (vertex[1] - center[1])
+  ] as Vec2) as [Vec2, Vec2, Vec2]
+}
+
+const drawFlatHomothety = (root: SVGElement, sigma: 1 | -1, first: FlatCycle, center: Vec2, scale: number, progress: number, transform: ViewportTransform) => {
+  const imageScale = homothetyScaleAt(scale, progress)
+  if (Math.abs(imageScale) > 1e-10 && Math.abs(imageScale - 1) > 1e-10 && Math.abs(imageScale - scale) > 1e-10) {
     drawFlatCycle(root, sigma, {
       center: [center[0] + imageScale * (first.center[0] - center[0]), center[1] + imageScale * (first.center[1] - center[1])],
       radiusSquared: imageScale * imageScale * first.radiusSquared,
       label: 'Homothety image'
-    }, transform, `${className} cycle-homothety-image`)
+    }, transform, 'cycle-homothety-image')
   }
+}
+
+const drawFlatHomotheticTriangle = (root: SVGElement, vertices: [Vec2, Vec2, Vec2], center: Vec2, scale: number, progress: number, transform: ViewportTransform) => {
+  const imageScale = homothetyScaleAt(scale, progress)
+  if (Math.abs(imageScale) <= 1e-10 || Math.abs(imageScale - 1) <= 1e-10) {
+    return
+  }
+  const image = homotheticVertices(vertices, center, scale, progress)
+  image.forEach((_, index) => drawPolyline(root, [image[(index + 1) % 3]!, image[(index + 2) % 3]!], transform, indexedClass('homothety-triangle', index)))
+  image.forEach((point, index) => drawMarker(root, point, transform, indexedClass('homothety-triangle-marker', index), 4.5))
 }
 
 const projectiveEndpointClass = (cycleClass: string) => (point: Vec2) => {
@@ -731,7 +753,7 @@ const curvedGeodesic = (mode: GeometryMode, metric: Vec3, start: Vec3, end: Vec3
   return projectedPaths(mode, sampleGeodesic(metric, start, end), transform.bounds)
 }
 
-const drawFlat = (root: SVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, Vec2], transform: ViewportTransform, overlays: Overlays, selectedBranch: number, homothetyProgress: number) => {
+const drawFlat = (root: SVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, Vec2], transform: ViewportTransform, overlays: Overlays, selectedBranch: number, homothetyProgress: number, homothetyKind: NinePointHomothety) => {
   const sigma = mode === 'minkowski' ? -1 : 1
   const state = buildFlatState(sigma, vertices)
   const showTheorem = state.valid
@@ -739,8 +761,8 @@ const drawFlat = (root: SVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, V
   const minkowskiCircle = mode === 'euclidean' && overlays.minkowskiCircumcircle ? minkowskiCircumcycle(vertices) : null
   const tangentCycle = state.tangentCycles[selectedBranch]
   const contact = state.contacts[selectedBranch]
-  const homothety = showTheorem && overlays.homothety && state.ninePoint && tangentCycle && contact
-    ? flatCycleHomothety(state.ninePoint, tangentCycle, contact)
+  const homothety = showTheorem && overlays.homothety && state.circumcircle && state.ninePoint && state.orthocenter
+    ? { center: homothetyKind === 'euler' ? state.orthocenter : state.centroid, scale: homothetyKind === 'euler' ? 0.5 : -0.5 }
     : null
 
   if (euclideanCircle) {
@@ -751,16 +773,16 @@ const drawFlat = (root: SVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, V
     drawFlatCycle(root, -1, minkowskiCircle, transform, 'cycle-minkowski-circumcircle')
   }
 
-  if (showTheorem && overlays.circumcircle && state.circumcircle) {
+  if (showTheorem && (overlays.circumcircle || homothety) && state.circumcircle) {
     drawFlatCycle(root, sigma, state.circumcircle, transform, 'cycle-circumcircle')
   }
 
-  if (showTheorem && overlays.euler && state.ninePoint) {
+  if (showTheorem && (overlays.euler || homothety) && state.ninePoint) {
     drawFlatCycle(root, sigma, state.ninePoint, transform, 'cycle-euler')
   }
 
-  if (homothety && state.ninePoint && tangentCycle) {
-    drawFlatHomothety(root, sigma, state.ninePoint, homothety.center, homothety.scale, homothetyProgress, transform, tangentCycleClass(selectedBranch))
+  if (homothety && state.circumcircle) {
+    drawFlatHomothety(root, sigma, state.circumcircle, homothety.center, homothety.scale, homothetyProgress, transform)
   }
 
   if (showTheorem && overlays.tangent) {
@@ -819,6 +841,9 @@ const drawFlat = (root: SVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, V
     if (contact?.point) {
       drawMarker(root, contact.point, transform, `contact-marker ${tangentConstructionClass(selectedBranch)}`, 4.5)
     }
+  }
+  if (homothety) {
+    drawFlatHomotheticTriangle(root, vertices, homothety.center, homothety.scale, homothetyProgress, transform)
   }
 }
 
@@ -1129,7 +1154,7 @@ const drawCurved = (root: SVGElement, mode: GeometryMode, vertices2: [Vec2, Vec2
   }
 }
 
-export const renderViewport = (svg: SVGSVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, Vec2], overlays: Overlays, selectedBranch: number, fixedBounds?: Bounds, boostActive = false, centroidTransformActive = false, circumcenterMotionActive = false, parabolicKappa = 0, parabolicChart: ParabolicChart = 'natural', parabolicView: ParabolicView = 'galilei', homothetyProgress = 0.5): ViewportTransform => {
+export const renderViewport = (svg: SVGSVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, Vec2], overlays: Overlays, selectedBranch: number, fixedBounds?: Bounds, boostActive = false, centroidTransformActive = false, circumcenterMotionActive = false, parabolicKappa = 0, parabolicChart: ParabolicChart = 'natural', parabolicView: ParabolicView = 'galilei', homothetyProgress = 0, homothetyKind: NinePointHomothety = 'euler'): ViewportTransform => {
   svg.replaceChildren()
   const transform = createTransform(fixedBounds ?? boundsForMode(mode, vertices), Boolean(fixedBounds))
   const projectiveTransform = mode === 'ads' ? adsProjectiveTransform(transform) : transform
@@ -1163,7 +1188,7 @@ export const renderViewport = (svg: SVGSVGElement, mode: GeometryMode, vertices:
   } else if (isCurvedMode(mode)) {
     drawCurved(root, mode, vertices, transform, overlays, selectedBranch)
   } else {
-    drawFlat(root, mode, vertices, transform, overlays, selectedBranch, homothetyProgress)
+    drawFlat(root, mode, vertices, transform, overlays, selectedBranch, homothetyProgress, homothetyKind)
   }
 
   if (centroidTransformActive) {

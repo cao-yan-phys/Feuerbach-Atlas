@@ -14,11 +14,6 @@ export interface FlatContact {
   discriminant: number | null
 }
 
-export interface FlatHomothety {
-  center: Vec2
-  scale: number
-}
-
 export interface FlatState {
   kind: TriangleKind
   valid: boolean
@@ -205,31 +200,6 @@ export const flatCycleContact = (sigma: 1 | -1, first: FlatCycle, second: FlatCy
   const root = -quadraticB / (2 * quadraticA)
 
   return { point: add2(particular, scale2(direction, root)), discriminant }
-}
-
-export const flatCycleHomothety = (first: FlatCycle, second: FlatCycle, contact: FlatContact, tolerance = 1e-8): FlatHomothety | null => {
-  if (!contact.point) {
-    return null
-  }
-
-  const source = subtract2(first.center, contact.point)
-  const target = subtract2(second.center, contact.point)
-  const index = Math.abs(source[0]) >= Math.abs(source[1]) ? 0 : 1
-  const denominator = source[index]
-  if (Math.abs(denominator) <= tolerance) {
-    return null
-  }
-
-  const scale = target[index] / denominator
-  const centerResidual = Math.hypot(target[0] - scale * source[0], target[1] - scale * source[1])
-  const radiusResidual = Math.abs(second.radiusSquared - scale * scale * first.radiusSquared)
-  const scaleSize = Math.max(1, Math.hypot(...target), Math.abs(scale) * Math.hypot(...source))
-  const radiusSize = Math.max(1, Math.abs(second.radiusSquared), Math.abs(scale * scale * first.radiusSquared))
-  if (!Number.isFinite(scale) || Math.abs(scale) <= tolerance || Math.abs(scale - 1) <= tolerance || centerResidual > tolerance * scaleSize || radiusResidual > tolerance * radiusSize) {
-    return null
-  }
-
-  return { center: contact.point, scale }
 }
 
 export const buildFlatState = (sigma: 1 | -1, vertices: [Vec2, Vec2, Vec2]): FlatState => {

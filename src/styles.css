@@ -54,6 +54,14 @@ input:focus-visible {
   padding: 12px 0 36px;
 }
 
+.atlas-copyright {
+  width: calc(100vw - 32px);
+  margin: 0 auto 20px;
+  color: #777770;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
 .atlas-title {
   width: 100%;
 }
@@ -461,12 +469,12 @@ h1 [data-katex] * {
 }
 
 .toggle-homothety > span {
-  color: #806515;
-  font-weight: 700;
+  color: #42423d;
+  font-weight: 400;
 }
 
 .toggle-homothety input {
-  accent-color: #806515;
+  accent-color: #305a74;
 }
 
 .homothety-control {
@@ -474,11 +482,40 @@ h1 [data-katex] * {
   gap: 6px;
 }
 
+.homothety-motion {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.homothety-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.homothety-kind-button {
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid #b9b9b2;
+  border-radius: 4px;
+  background: #fff;
+  color: #171717;
+  cursor: pointer;
+}
+
+.homothety-kind-button:hover,
+.homothety-kind-button.is-active {
+  border-color: #1d5f7d;
+  background: #eaf4f8;
+}
+
 .homothety-progress {
   width: 100%;
   height: 18px;
   margin: 0;
-  accent-color: #806515;
+  accent-color: #305a74;
 }
 
 .advanced-panel {
@@ -706,8 +743,21 @@ h1 [data-katex] * {
 }
 
 .cycle-homothety-image {
+  stroke: #806515;
   stroke-width: 1.35;
   stroke-dasharray: 5 4;
+}
+
+.homothety-triangle {
+  stroke: var(--construction-color);
+  stroke-width: 1.25;
+  opacity: 0.64;
+}
+
+.homothety-triangle-marker {
+  fill: #fff;
+  stroke: var(--construction-color);
+  stroke-width: 1.45;
 }
 
 .vertex-0 {
@@ -1065,6 +1115,10 @@ h1 [data-katex] * {
   .atlas-shell {
     width: calc(100vw - 20px);
     padding-top: 16px;
+  }
+
+  .atlas-copyright {
+    width: calc(100vw - 20px);
   }
 
   .viewport-panel,

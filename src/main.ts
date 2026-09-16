@@ -5,13 +5,13 @@ import { adsProjectiveProject, hyperbolicProject, lorentzProjectiveProject, sphe
 import { curvedDomain, isCurvedMode, liftForMode, metricForMode } from './geometry/modes'
 import { boostTriangle, rotateTriangle } from './math/affine'
 import { buildCurvedState } from './math/curvedKernel'
-import { buildFlatState, euclideanCircumcircle, flatCycleHomothety, minkowskiCircumcycle } from './math/flatKernel'
+import { buildFlatState, euclideanCircumcircle, minkowskiCircumcycle } from './math/flatKernel'
 import { buildIndicatrixConstruction, lorentzFinslerIndicatrixPoint, normedIndicatrixPoint, normalizeLorentzFinslerShape, normalizeNormedShape, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from './math/indicatrixKernel'
 import { bilinear3, scale3 } from './math/linalg'
 import { buildParabolicState, canonicalParabolicParameters, canonicalToRawParabolic, isParabolicMode, parabolicDefaultKappa, parabolicDisplayPoint, parabolicModeForKappa, parabolicPointFromDisplay, type ParabolicChart, type ParabolicView } from './math/parabolicKernel'
 import type { GeometryMode, Vec2, Vec3 } from './math/types'
 import { indicatrixViewportBounds, renderIndicatrixViewport, type IndicatrixOverlays, type IndicatrixSimilarity, type IndicatrixViewportTransform } from './render/indicatrixViewport'
-import { renderViewport, type Overlays, type ViewportTransform } from './render/svgViewport'
+import { renderViewport, type NinePointHomothety, type Overlays, type ViewportTransform } from './render/svgViewport'
 
 const atlasModes: Array<[GeometryMode, string, string]> = [
   ['sphere', 'S²', 'S^2'],
@@ -32,6 +32,7 @@ interface AtlasState {
   parabolicChart: ParabolicChart
   carrollDual: boolean
   homothetyProgress: number
+  homothetyKind: NinePointHomothety
   overlays: Overlays
 }
 
@@ -63,7 +64,8 @@ const atlasState: AtlasState = {
   parabolicKappa: 0,
   parabolicChart: 'beltrami',
   carrollDual: false,
-  homothetyProgress: 0.5,
+  homothetyProgress: 0,
+  homothetyKind: 'euler',
   overlays: {
     bisectors: true,
     euler: true,
@@ -193,7 +195,7 @@ const currentReadout = (): Array<[string, string]> => {
   if (isParabolicMode(atlasState.mode)) {
     const state = buildParabolicState(atlasState.parabolicKappa, atlasState.vertices)
     const geometry = atlasState.carrollDual
-      ? atlasState.mode === 'nhnegative' ? 'Carroll–dS²' : atlasState.mode === 'nhpositive' ? 'Carroll–AdS²' : 'Carroll²'
+      ? atlasState.mode === 'nhnegative' ? 'Carroll–dS²' : atlasState.mode === 'nhpositive' ? 'Carroll–AdS²' : 'Carroll'
       : atlasState.mode === 'nhnegative' ? 'oscillating Newton–Hooke' : atlasState.mode === 'nhpositive' ? 'expanding Newton–Hooke' : 'Galilean'
     const rows: Array<[string, string]> = [
       ['geometry', geometry],
@@ -355,7 +357,7 @@ const indicatrixDetailsMarkup = () => {
 }
 
 const indicatrixNoteMarkup = () => `
-  <div class="note-content">The Feuerbach geometry of normed planes was studied by <a href="https://faculty.washington.edu/moishe/branko/BG25%20Geometry%20of%20Minkowski%20planes.pdf" target="_blank" rel="noreferrer">Asplund and Grünbaum (1960)</a> and <a href="https://www.e-periodica.ch/digbib/view?pid=ens-001%3A2007%3A53%3A%3A273" target="_blank" rel="noreferrer">Martini and Spirova (2007)</a>.</div>
+  <div class="note-content">The Feuerbach geometry of normed planes was studied by <a href="https://faculty.washington.edu/moishe/branko/BG25%20Geometry%20of%20Minkowski%20planes.pdf" target="_blank" rel="noreferrer">Asplund and Grünbaum (1960)</a>, <a href="https://www.e-periodica.ch/digbib/view?pid=ens-001%3A2007%3A53%3A%3A273" target="_blank" rel="noreferrer">Martini and Spirova (2007)</a>, and <a href="https://arxiv.org/abs/1602.06144" target="_blank" rel="noreferrer">Leopold and Martini (2016)</a>.</div>
 `
 
 const atlasPresetOptions = () => (isParabolicMode(atlasState.mode)
@@ -382,14 +384,12 @@ const interactionDescriptions: Partial<Record<keyof Overlays, string>> = {
 
 const interactionDescription = (key: keyof Overlays) => key === 'centers' && isParabolicMode(atlasState.mode) ? undefined : interactionDescriptions[key]
 
-const flatHomothetyAvailable = () => {
+const ninePointHomothetyAvailable = () => {
   if (atlasState.mode !== 'euclidean' && atlasState.mode !== 'minkowski') {
     return false
   }
   const state = buildFlatState(atlasState.mode === 'minkowski' ? -1 : 1, atlasState.vertices)
-  const tangent = state.tangentCycles[atlasState.branch]
-  const contact = state.contacts[atlasState.branch]
-  return Boolean(state.ninePoint && tangent && contact && flatCycleHomothety(state.ninePoint, tangent, contact))
+  return Boolean(state.valid && state.circumcircle && state.ninePoint && state.orthocenter)
 }
 
 const overlayControl = (key: keyof Overlays, label: string) => {
@@ -415,11 +415,19 @@ const overlayControls = () => {
   const horizonControls: Array<[keyof Overlays, string]> = atlasState.mode === 'desitter' ? [['horizon', 'Horizon (for <span data-katex="x=0">x=0</span>)']] : []
   const euclideanCircumcircleControl: Array<[keyof Overlays, string]> = atlasState.mode === 'minkowski' ? [['euclideanCircumcircle', 'Euclidean circumcircle']] : []
   const minkowskiCircumcircleControl: Array<[keyof Overlays, string]> = atlasState.mode === 'euclidean' ? [['minkowskiCircumcircle', 'Minkowski circumcircle']] : []
-  const homothetyAvailable = flatHomothetyAvailable()
+  const homothetyAvailable = ninePointHomothetyAvailable()
   const homothetyControl = homothetyAvailable ? `
     <div class="homothety-control">
       ${overlayControl('homothety', 'Homothety')}
-      ${atlasState.overlays.homothety ? `<input class="homothety-progress" type="range" min="0" max="1" step="0.01" value="${atlasState.homothetyProgress}" data-homothety-progress aria-label="Homothety progress" />` : ''}
+      ${atlasState.overlays.homothety ? `
+        <div class="homothety-motion">
+          <div class="homothety-options" role="group" aria-label="Nine-point homothety">
+            <button class="homothety-kind-button${atlasState.homothetyKind === 'euler' ? ' is-active' : ''}" type="button" data-homothety-kind="euler" aria-label="Euler homothety" aria-pressed="${atlasState.homothetyKind === 'euler'}"><span data-katex="\\mathrm{I}">I</span></button>
+            <button class="homothety-kind-button${atlasState.homothetyKind === 'medial' ? ' is-active' : ''}" type="button" data-homothety-kind="medial" aria-label="Medial homothety" aria-pressed="${atlasState.homothetyKind === 'medial'}"><span data-katex="\\mathrm{II}">II</span></button>
+          </div>
+          <input class="homothety-progress" type="range" min="0" max="1" step="0.01" value="${atlasState.homothetyProgress}" data-homothety-progress aria-label="Homothety progress" />
+        </div>
+      ` : ''}
     </div>
   ` : ''
   const parabolicControls: Array<[keyof Overlays, string]> = parabolic ? [['singularBranches', 'Pseudoaltitudes']] : []
@@ -542,7 +550,7 @@ const parabolicPresetControl = () => `
     <div class="parabolic-preset-options" role="group" aria-label="Preset">
       ${([
         ['nhnegative-default', atlasState.carrollDual ? '\\mathrm{Carroll\\text{-}dS}^{2}' : '\\mathrm{NH}_{-}'],
-        ['galilei-default', atlasState.carrollDual ? '\\mathrm{Carroll}^{2}' : '\\mathbb{G}^2'],
+        ['galilei-default', atlasState.carrollDual ? '\\mathrm{Carroll}' : '\\mathbb{G}^2'],
         ['nhpositive-default', atlasState.carrollDual ? '\\mathrm{Carroll\\text{-}AdS}^{2}' : '\\mathrm{NH}_{+}']
       ] as Array<[string, string]>).map(([id, formula]) => `
         <button class="branch-button${atlasState.preset.id === id ? ' is-active' : ''}" type="button" data-parabolic-preset="${id}" aria-pressed="${atlasState.preset.id === id}"><span data-katex="${formula}">${formula}</span></button>
@@ -617,8 +625,8 @@ const atlasShell = () => {
   `
   const controlContent = activeView === 'indicatrix' ? indicatrixControls() : `
         <button class="panel-button" type="button" data-reset>Reset</button>
-        ${isParabolicMode(atlasState.mode) ? '' : `<section class="branch-control" aria-label="Tangent branch">
-          <span>Branch</span>
+        ${isParabolicMode(atlasState.mode) ? '' : `<section class="branch-control" aria-label="Tangent cycle">
+          <span>Tangent cycle</span>
           <div class="branch-options" role="group" aria-label="Tangent branch">${branchControls()}</div>
         </section>`}
         ${presetControl()}
@@ -655,6 +663,7 @@ const atlasShell = () => {
         ${controlContent}
       </section>
     </main>
+    <footer class="atlas-copyright">© 2026 Yan Cao</footer>
   `
   renderMath()
   wireControls()
@@ -785,6 +794,7 @@ const currentLink = () => {
     c: isParabolicMode(atlasState.mode) ? atlasState.parabolicChart : '',
     d: isParabolicMode(atlasState.mode) && atlasState.carrollDual ? '1' : '',
     h: String(atlasState.homothetyProgress),
+    u: atlasState.homothetyKind,
     o: overlayKeys.map((key) => atlasState.overlays[key] ? '1' : '0').join('')
   })
   url.hash = state.toString()
@@ -961,7 +971,7 @@ const renderScene = () => {
     return
   }
   const motionActive = atlasState.mode === 'minkowski' ? minkowskiBoostActive : atlasState.mode === 'euclidean' ? euclideanRotationActive : false
-  const transform = renderViewport(svg, atlasState.mode, atlasState.vertices, atlasState.overlays, atlasState.branch, atlasDragBounds ?? atlasGridBounds ?? undefined, motionActive, centroidTransformActive, circumcenterMotionActive, atlasState.parabolicKappa, atlasState.parabolicChart, parabolicView(), atlasState.homothetyProgress)
+  const transform = renderViewport(svg, atlasState.mode, atlasState.vertices, atlasState.overlays, atlasState.branch, atlasDragBounds ?? atlasGridBounds ?? undefined, motionActive, centroidTransformActive, circumcenterMotionActive, atlasState.parabolicKappa, atlasState.parabolicChart, parabolicView(), atlasState.homothetyProgress, atlasState.homothetyKind)
   atlasTransform = transform
   if (atlasState.overlays.grid && !atlasGridBounds) {
     atlasGridBounds = transform.bounds
@@ -979,6 +989,8 @@ const loadPreset = (preset: Preset) => {
   atlasState.preset = preset
   atlasState.vertices = cloneVertices(preset.vertices)
   atlasState.branch = preset.branchIndex ?? 0
+  atlasState.homothetyProgress = 0
+  atlasState.homothetyKind = 'euler'
   atlasState.parabolicKappa = isParabolicMode(preset.mode) ? parabolicDefaultKappa(preset.mode) : 0
   if (isParabolicMode(preset.mode)) {
     if (!wasParabolic) {
@@ -1052,13 +1064,6 @@ const wireControls = () => {
         tangentControl.classList.remove('tangent-branch-0', 'tangent-branch-1', 'tangent-branch-2', 'tangent-branch-3')
         tangentControl.classList.add(`tangent-branch-${atlasState.branch}`)
       }
-      if (atlasState.overlays.homothety) {
-        if (!flatHomothetyAvailable()) {
-          atlasState.overlays.homothety = false
-        }
-        atlasShell()
-        return
-      }
       renderScene()
     })
   })
@@ -1121,14 +1126,10 @@ const wireControls = () => {
       if (key === 'centers' && !input.checked) {
         centroidTransformActive = false
       }
-      if (key === 'homothety' && input.checked) {
-        atlasState.overlays.euler = true
-        atlasState.overlays.tangent = true
-        atlasShell()
-        return
-      }
-      if ((key === 'euler' || key === 'tangent') && !input.checked && atlasState.overlays.homothety) {
-        atlasState.overlays.homothety = false
+      if (key === 'homothety') {
+        if (input.checked) {
+          atlasState.homothetyProgress = 0
+        }
         atlasShell()
         return
       }
@@ -1144,6 +1145,17 @@ const wireControls = () => {
       atlasState.homothetyProgress = Math.max(0, Math.min(1, value))
       renderScene()
     }
+  })
+  atlasApp.querySelectorAll<HTMLButtonElement>('[data-homothety-kind]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const kind = button.dataset.homothetyKind
+      if (kind !== 'euler' && kind !== 'medial') {
+        return
+      }
+      atlasState.homothetyKind = kind
+      atlasState.homothetyProgress = 0
+      atlasShell()
+    })
   })
   atlasApp.querySelectorAll<HTMLInputElement>('[data-indicatrix-coordinate]').forEach((input) => {
     input.addEventListener('change', () => {
@@ -1643,6 +1655,7 @@ const hydrateLinkedState = () => {
   const linkedBranch = Number(state.get('b'))
   const linkedKappa = Number(state.get('k'))
   const linkedHomothetyProgress = Number(state.get('h'))
+  const linkedHomothetyKind = state.get('u')
   const linkedChart = state.get('c')
   const linkedDual = state.get('d')
   const linkedOverlays = state.get('o')
@@ -1653,7 +1666,8 @@ const hydrateLinkedState = () => {
   atlasState.parabolicKappa = isParabolicMode(linkedMode) && Number.isFinite(linkedKappa) ? Math.max(-0.9, Math.min(0.9, linkedKappa)) : isParabolicMode(linkedMode) ? parabolicDefaultKappa(linkedMode) : 0
   atlasState.parabolicChart = isParabolicMode(linkedMode) && linkedChart === 'natural' ? 'natural' : 'beltrami'
   atlasState.carrollDual = isParabolicMode(linkedMode) && linkedDual === '1'
-  atlasState.homothetyProgress = Number.isFinite(linkedHomothetyProgress) ? Math.max(0, Math.min(1, linkedHomothetyProgress)) : 0.5
+  atlasState.homothetyProgress = Number.isFinite(linkedHomothetyProgress) ? Math.max(0, Math.min(1, linkedHomothetyProgress)) : 0
+  atlasState.homothetyKind = linkedHomothetyKind === 'medial' ? 'medial' : 'euler'
   if (linkedOverlays && linkedOverlays.length <= overlayKeys.length && /^[01]+$/.test(linkedOverlays)) {
     overlayKeys.slice(0, linkedOverlays.length).forEach((key, index) => {
       atlasState.overlays[key] = linkedOverlays[index] === '1'
