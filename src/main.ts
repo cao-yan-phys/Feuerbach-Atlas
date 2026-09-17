@@ -3,15 +3,15 @@ import './styles.css'
 import { defaultPresetForMode, presets, presetsForMode, type Preset, visiblePresetsForMode } from './data/presets'
 import { adsProjectiveProject, hyperbolicProject, lorentzProjectiveProject, sphereProject } from './geometry/charts'
 import { curvedDomain, isCurvedMode, liftForMode, metricForMode } from './geometry/modes'
-import { boostTriangle, rotateTriangle } from './math/affine'
+import { boostTriangle, rotateTriangle, transvectHyperbolicTriangle, transvectLorentzianTriangle, transvectSphereTriangle } from './math/affine'
 import { buildCurvedState } from './math/curvedKernel'
 import { buildFlatState, euclideanCircumcircle, minkowskiCircumcycle } from './math/flatKernel'
-import { buildIndicatrixConstruction, lorentzFinslerIndicatrixPoint, normedIndicatrixPoint, normalizeLorentzFinslerShape, normalizeNormedShape, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from './math/indicatrixKernel'
+import { lorentzFinslerIndicatrixPoint, normedIndicatrixPoint, normalizeLorentzFinslerShape, normalizeNormedShape, type CircumcircleSeed, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from './math/indicatrixKernel'
 import { bilinear3, scale3 } from './math/linalg'
 import { buildParabolicState, canonicalParabolicParameters, canonicalToRawParabolic, isParabolicMode, parabolicDefaultKappa, parabolicDisplayPoint, parabolicModeForKappa, parabolicPointFromDisplay, type ParabolicChart, type ParabolicView } from './math/parabolicKernel'
 import type { GeometryMode, Vec2, Vec3 } from './math/types'
 import { indicatrixViewportBounds, renderIndicatrixViewport, type IndicatrixOverlays, type IndicatrixSimilarity, type IndicatrixViewportTransform } from './render/indicatrixViewport'
-import { renderViewport, type NinePointHomothety, type Overlays, type ViewportTransform } from './render/svgViewport'
+import { renderViewport, type NinePointHomothety, type Overlays, type TransvectionDisplay, type TransvectionMode, type ViewportTransform } from './render/svgViewport'
 
 const atlasModes: Array<[GeometryMode, string, string]> = [
   ['sphere', 'S²', 'S^2'],
@@ -43,6 +43,7 @@ interface IndicatrixState {
   lorentzShape: LorentzFinslerShape
   similarity: IndicatrixSimilarity
   overlays: IndicatrixOverlays
+  circumcircleSeed: CircumcircleSeed | null
 }
 
 const indicatrixDefaultVertices = (mode: IndicatrixMode, normedShape: NormedShape, lorentzShape: LorentzFinslerShape): [Vec2, Vec2, Vec2] => {
@@ -79,7 +80,8 @@ const atlasState: AtlasState = {
     horizon: false,
     homothety: false,
     grid: false,
-    singularBranches: true
+    singularBranches: true,
+    transvection: false
   }
 }
 
@@ -92,6 +94,7 @@ const indicatrixInitialState = (): IndicatrixState => {
     normedShape,
     lorentzShape,
     similarity: { translation: [0, 0], scale: 1 },
+    circumcircleSeed: null,
     overlays: {
       medians: true,
       circum: true,
@@ -110,7 +113,7 @@ let indicatrixCentroidTransformActive = false
 
 const indicatrixOverlayKeys = ['medians', 'circum', 'translated', 'feuerbach', 'midpoints', 'centers', 'grid'] as const
 
-const overlayKeys = ['bisectors', 'euler', 'altitudes', 'tangent', 'centers', 'circumcircle', 'euclideanCircumcircle', 'minkowskiCircumcircle', 'nullBoundary', 'horizon', 'homothety', 'grid', 'singularBranches'] as const
+const overlayKeys = ['bisectors', 'euler', 'altitudes', 'tangent', 'centers', 'circumcircle', 'euclideanCircumcircle', 'minkowskiCircumcircle', 'nullBoundary', 'horizon', 'homothety', 'grid', 'singularBranches', 'transvection'] as const
 
 const atlasApp = document.querySelector<HTMLDivElement>('#app')
 const wiredViewports = new WeakSet<SVGSVGElement>()
@@ -120,6 +123,8 @@ let atlasGridBounds: ViewportTransform['bounds'] | null = null
 let atlasDragBounds: ViewportTransform['bounds'] | null = null
 let minkowskiBoostActive = false
 let euclideanRotationActive = false
+let lorentzianOriginBoostActive = false
+let transvectionSession: { mode: TransvectionMode, vertices: [Vec2, Vec2, Vec2], coordinate: number } | null = null
 let centroidTransformActive = false
 let circumcenterMotionActive = false
 let exportAlignmentWired = false
@@ -276,9 +281,9 @@ const atlasModeButtons = () => atlasModes.map(([mode, label, formula]) => {
 }).join('')
 
 const indicatrixModeButtons = () => `
-  <div class="indicatrix-mode-grid" role="group" aria-label="Indicatrix geometry">
+  <div class="indicatrix-mode-grid" role="group" aria-label="Plane geometry">
     <button class="mode-button${activeView === 'indicatrix' && indicatrixState.mode === 'normed' ? ' is-active' : ''}" type="button" data-indicatrix-mode="normed" aria-pressed="${activeView === 'indicatrix' && indicatrixState.mode === 'normed'}">Normed plane</button>
-    <button class="mode-button${activeView === 'indicatrix' && indicatrixState.mode === 'lorentz-finsler' ? ' is-active' : ''}" type="button" data-indicatrix-mode="lorentz-finsler" aria-pressed="${activeView === 'indicatrix' && indicatrixState.mode === 'lorentz-finsler'}">Lorentz–Finsler plane</button>
+    <button class="mode-button${activeView === 'indicatrix' && indicatrixState.mode === 'lorentz-finsler' ? ' is-active' : ''}" type="button" data-indicatrix-mode="lorentz-finsler" aria-pressed="${activeView === 'indicatrix' && indicatrixState.mode === 'lorentz-finsler'}">Lorentz–Minkowski plane</button>
   </div>
 `
 
@@ -295,7 +300,7 @@ const indicatrixControl = (key: keyof IndicatrixOverlays, label: string) => `
 
 const indicatrixControls = () => {
   const shape = indicatrixState.mode === 'normed' ? indicatrixState.normedShape : indicatrixState.lorentzShape
-  const feuLabel = indicatrixState.mode === 'normed' ? 'Feuerbach circle' : 'Feuerbach indicatrix'
+  const feuLabel = 'Feuerbach circle'
   return `
     <button class="panel-button" type="button" data-indicatrix-reset>Reset</button>
     <section class="indicatrix-range-section" aria-label="Shape">
@@ -304,13 +309,13 @@ const indicatrixControls = () => {
         <label class="indicatrix-range">
           <span data-katex="${indicatrixShapeLabels()[index]!}">${indicatrixShapeLabels()[index]!}</span>
           <output>${value.toFixed(2)}</output>
-          <input type="range" min="-0.35" max="0.35" step="0.01" value="${value}" data-indicatrix-shape="${index}" aria-label="Shape coefficient ${index + 1}" />
+          <input type="range" min="${indicatrixState.mode === 'lorentz-finsler' ? '-1.2' : '-0.35'}" max="${indicatrixState.mode === 'lorentz-finsler' ? '1.2' : '0.35'}" step="0.01" value="${value}" data-indicatrix-shape="${index}" aria-label="Shape coefficient ${index + 1}" />
         </label>
       `).join('')}
     </section>
     <div class="toggle-grid">
       ${indicatrixControl('medians', 'Medians')}
-      ${indicatrixControl('circum', 'Circum-indicatrix')}
+      ${indicatrixControl('circum', 'Circumcircle')}
       ${indicatrixControl('translated', '<span data-katex="C">C</span>-orthocenter')}
       ${indicatrixControl('feuerbach', feuLabel)}
       ${indicatrixControl('midpoints', 'Midpoints')}
@@ -344,13 +349,19 @@ const indicatrixDataMarkup = () => {
 const indicatrixDetailsMarkup = () => {
   const normed = indicatrixState.mode === 'normed'
   const unit = normed
-    ? 'h(\\phi)=1+a\\cos(2\\phi)+b\\sin(2\\phi)+c\\cos(4\\phi),\\quad (x,y)=h(\\phi)(\\cos\\phi,\\sin\\phi)+\\frac{d h}{d\\phi}(-\\sin\\phi,\\cos\\phi),\\quad 0\\leq\\phi\\lt2\\pi,\\quad h+\\frac{d^2h}{d\\phi^2}>0'
-    : '(\\mu_1,\\mu_2,\\mu_3)=(-1.10,0.15,1.25),\\quad q(\\theta)=\\sum_{j=1}^{3}q_j e^{-((\\theta-\\mu_j)/1.9)^2},\\quad f(\\theta)=e^{q(\\theta)},\\quad (x,y)=\\frac{(\\sinh\\theta,\\cosh\\theta)}{f(\\theta)},\\quad -\\infty\\lt\\theta\\lt\\infty,\\quad f>0,\\quad \\frac{d^2f}{d\\theta^2}-f\\lt0'
+    ? [
+        ['(x,y)', '=h(\\phi)(\\cos\\phi,\\sin\\phi)+\\frac{d h}{d\\phi}(-\\sin\\phi,\\cos\\phi),\\quad h>0,\\quad h+\\frac{d^2h}{d\\phi^2}>0,\\quad 0\\leq\\phi\\lt2\\pi\\text{.}'],
+        ['h(\\phi)', '=1+a\\cos(2\\phi)+b\\sin(2\\phi)+c\\cos(4\\phi)\\text{.}']
+      ]
+    : [
+        ['(x,y)', '=\\frac{(\\sinh\\theta,\\cosh\\theta)}{f(\\theta)},\\quad f>0,\\quad \\frac{d^2f}{d\\theta^2}-f\\lt0,\\quad \\theta\\in\\mathbb{R}\\text{.}'],
+        ['q(\\theta)', '=\\sum_{j=1}^{3}q_j\\exp\\!\\left[-\\left(\\frac{\\theta-\\mu_j}{1.9}\\right)^2\\right],\\quad f(\\theta)=e^{q(\\theta)},\\quad (\\mu_1,\\mu_2,\\mu_3)=(-1.10,0.15,1.25)\\text{.}']
+      ]
   return `
     <div class="indicatrix-details">
       <section class="indicatrix-detail">
-        <span class="indicatrix-detail-label">${normed ? 'Unit circle' : 'Forward unit indicatrix'}</span>
-        <span class="indicatrix-detail-formula" data-katex="${unit}\\text{.}">${unit}.</span>
+        <span class="indicatrix-detail-label">${normed ? 'Unit circle' : 'Forward unit circle'}</span>
+        <span class="indicatrix-detail-formula indicatrix-detail-formula-aligned">${unit.map(([left, right]) => `<span data-katex="${left}">${left}</span><span data-katex="${right}">${right}</span>`).join('')}</span>
       </section>
     </div>
   `
@@ -411,8 +422,9 @@ const overlayControls = () => {
     : flat
     ? [['bisectors', 'Medians'], ['euler', 'Nine-point circle'], ['altitudes', 'Altitudes'], ['tangent', 'Tangent cycles'], ['circumcircle', 'Circumcircle'], ['centers', 'Centers']]
     : [['bisectors', 'Area bisectors'], ['euler', 'Euler cycle'], ['altitudes', 'Pseudoaltitudes'], ['tangent', 'Tangent cycles'], ['centers', 'Centers']]
-  const nullControls: Array<[keyof Overlays, string]> = atlasState.mode === 'minkowski' || atlasState.mode === 'desitter' || atlasState.mode === 'ads' ? [['nullBoundary', 'null']] : []
+  const nullControls: Array<[keyof Overlays, string]> = atlasState.mode === 'minkowski' || atlasState.mode === 'desitter' || atlasState.mode === 'ads' ? [['nullBoundary', 'Null grid']] : []
   const horizonControls: Array<[keyof Overlays, string]> = atlasState.mode === 'desitter' ? [['horizon', 'Horizon (for <span data-katex="x=0">x=0</span>)']] : []
+  const transvectionControls: Array<[keyof Overlays, string]> = atlasState.mode === 'sphere' || atlasState.mode === 'hyperbolic' || atlasState.mode === 'desitter' || atlasState.mode === 'ads' ? [['transvection', 'Transvection']] : []
   const euclideanCircumcircleControl: Array<[keyof Overlays, string]> = atlasState.mode === 'minkowski' ? [['euclideanCircumcircle', 'Euclidean circumcircle']] : []
   const minkowskiCircumcircleControl: Array<[keyof Overlays, string]> = atlasState.mode === 'euclidean' ? [['minkowskiCircumcircle', 'Minkowski circumcircle']] : []
   const homothetyAvailable = ninePointHomothetyAvailable()
@@ -432,7 +444,7 @@ const overlayControls = () => {
   ` : ''
   const parabolicControls: Array<[keyof Overlays, string]> = parabolic ? [['singularBranches', 'Pseudoaltitudes']] : []
   const controls = [...labels, ...euclideanCircumcircleControl, ...minkowskiCircumcircleControl].map(([key, label]) => overlayControl(key, label)).join('')
-  const trailingControls = [...nullControls, ...horizonControls, ...parabolicControls, ['grid', 'Grid'] as [keyof Overlays, string]].map(([key, label]) => overlayControl(key, label)).join('')
+  const trailingControls = [...nullControls, ...horizonControls, ...transvectionControls, ...parabolicControls, ['grid', 'Grid'] as [keyof Overlays, string]].map(([key, label]) => overlayControl(key, label)).join('')
   return `${controls}${homothetyControl}${trailingControls}`
 }
 
@@ -591,8 +603,7 @@ const parabolicDualControl = () => isParabolicMode(atlasState.mode) ? `
 
 const atlasShell = () => {
   const [, atlasModeLabel] = selectedAtlasMode()
-  const modeLabel = activeView === 'indicatrix' ? indicatrixState.mode === 'normed' ? 'Normed plane' : 'Lorentz–Finsler plane' : atlasModeLabel
-  const indicatrixNotice = activeView === 'indicatrix' ? '<div class="indicatrix-notice"></div>' : ''
+  const modeLabel = activeView === 'indicatrix' ? indicatrixState.mode === 'normed' ? 'Normed plane' : 'Lorentz–Minkowski plane' : atlasModeLabel
   const workspacePanels = activeView === 'indicatrix' ? `
       <details class="advanced-panel indicatrix-data-panel">
         <summary>Data</summary>
@@ -656,7 +667,6 @@ const atlasShell = () => {
       <section class="viewport-panel" aria-label="${modeLabel} viewport">
         <svg class="geometry-viewport" viewBox="0 0 1000 700" aria-label="${modeLabel} viewport"></svg>
       </section>
-      ${indicatrixNotice}
       ${workspacePanels}
       </div>
       <section class="control-panel" aria-label="Controls">
@@ -749,6 +759,62 @@ const acceptedTriangle = (vertices: [Vec2, Vec2, Vec2] | null) => vertices?.ever
   const accepted = clampVertex(vertex)
   return accepted && sameVertex(accepted, vertex)
 }) ? vertices : null
+
+const isTransvectionMode = (mode: GeometryMode): mode is TransvectionMode => mode === 'sphere' || mode === 'hyperbolic' || mode === 'desitter' || mode === 'ads'
+
+const activeTransvection = () => {
+  const mode = atlasState.mode
+  if (!atlasState.overlays.transvection || !isTransvectionMode(mode)) {
+    return null
+  }
+  if (!transvectionSession || transvectionSession.mode !== mode) {
+    transvectionSession = { mode, vertices: cloneVertices(atlasState.vertices), coordinate: 0 }
+  }
+  return transvectionSession
+}
+
+const rebaseTransvection = () => {
+  if (transvectionSession && transvectionSession.mode === atlasState.mode) {
+    transvectionSession = { mode: transvectionSession.mode, vertices: cloneVertices(atlasState.vertices), coordinate: 0 }
+  }
+}
+
+const transvectionDisplayPoint = (session: NonNullable<ReturnType<typeof activeTransvection>>): Vec2 => session.mode === 'desitter'
+  ? [0, session.coordinate]
+  : session.mode === 'sphere'
+    ? [Math.tan(session.coordinate / 2), 0]
+    : [session.coordinate, 0]
+
+const transvectionLimits = (mode: 'desitter' | 'ads', vertices: [Vec2, Vec2, Vec2]): [number, number] => {
+  let minimum = -0.995
+  let maximum = 0.995
+  vertices.forEach((vertex) => {
+    const value = mode === 'desitter' ? vertex[1] : vertex[0]
+    if (value > 0) {
+      minimum = Math.max(minimum, -0.98 / value)
+    } else if (value < 0) {
+      maximum = Math.min(maximum, -0.98 / value)
+    }
+  })
+  return [minimum, maximum]
+}
+
+const transvectionTriangle = (session: NonNullable<ReturnType<typeof activeTransvection>>, coordinate: number) => {
+  if (session.mode === 'sphere') {
+    return transvectSphereTriangle(session.vertices, coordinate)
+  }
+  if (session.mode === 'hyperbolic') {
+    return transvectHyperbolicTriangle(session.vertices, coordinate)
+  }
+  return transvectLorentzianTriangle(session.vertices, session.mode, coordinate)
+}
+
+const acceptedTransvectionTriangle = (session: NonNullable<ReturnType<typeof activeTransvection>>, vertices: [Vec2, Vec2, Vec2] | null) => {
+  if (session.mode === 'sphere' || session.mode === 'hyperbolic') {
+    return vertices?.every((vertex) => vertex.every(Number.isFinite)) ? vertices : null
+  }
+  return acceptedTriangle(vertices)
+}
 
 const setParabolicKappa = (kappa: number) => {
   const next = Math.max(-0.9, Math.min(0.9, kappa))
@@ -945,33 +1011,29 @@ const syncIndicatrixData = () => {
   })
 }
 
-const syncIndicatrixNotice = () => {
-  if (activeView !== 'indicatrix') {
-    return
-  }
-  const notice = atlasApp.querySelector<HTMLElement>('.indicatrix-notice')
-  if (!notice) {
-    return
-  }
-  const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
-  notice.textContent = construction.valid ? '' : 'Choose three separated points.'
-}
-
 const renderScene = () => {
   const svg = atlasApp.querySelector<SVGSVGElement>('.geometry-viewport')
   if (!svg) {
     return
   }
   if (activeView === 'indicatrix') {
-    const rendered = renderIndicatrixViewport(svg, indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape, indicatrixState.overlays, indicatrixState.similarity, indicatrixCentroidTransformActive, indicatrixViewportBounds)
+    const rendered = renderIndicatrixViewport(svg, indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape, indicatrixState.overlays, indicatrixState.similarity, indicatrixCentroidTransformActive, indicatrixViewportBounds, indicatrixState.circumcircleSeed)
     indicatrixTransform = rendered.transform
+    if (rendered.circumcircleSeed) {
+      indicatrixState.circumcircleSeed = rendered.circumcircleSeed
+    }
     wireIndicatrixDrag(svg)
     syncIndicatrixData()
-    syncIndicatrixNotice()
     return
   }
-  const motionActive = atlasState.mode === 'minkowski' ? minkowskiBoostActive : atlasState.mode === 'euclidean' ? euclideanRotationActive : false
-  const transform = renderViewport(svg, atlasState.mode, atlasState.vertices, atlasState.overlays, atlasState.branch, atlasDragBounds ?? atlasGridBounds ?? undefined, motionActive, centroidTransformActive, circumcenterMotionActive, atlasState.parabolicKappa, atlasState.parabolicChart, parabolicView(), atlasState.homothetyProgress, atlasState.homothetyKind)
+  const transvection = activeTransvection()
+  const motionActive = atlasState.mode === 'minkowski'
+    ? minkowskiBoostActive
+    : atlasState.mode === 'euclidean'
+      ? euclideanRotationActive
+      : (atlasState.mode === 'desitter' || atlasState.mode === 'ads') && lorentzianOriginBoostActive && !transvection
+  const display: TransvectionDisplay | undefined = transvection ? { mode: transvection.mode, coordinate: transvection.coordinate } : undefined
+  const transform = renderViewport(svg, atlasState.mode, atlasState.vertices, atlasState.overlays, atlasState.branch, atlasDragBounds ?? atlasGridBounds ?? undefined, motionActive, centroidTransformActive, circumcenterMotionActive, atlasState.parabolicKappa, atlasState.parabolicChart, parabolicView(), atlasState.homothetyProgress, atlasState.homothetyKind, display)
   atlasTransform = transform
   if (atlasState.overlays.grid && !atlasGridBounds) {
     atlasGridBounds = transform.bounds
@@ -1006,6 +1068,8 @@ const loadPreset = (preset: Preset) => {
   }
   minkowskiBoostActive = false
   euclideanRotationActive = false
+  lorentzianOriginBoostActive = false
+  transvectionSession = null
   centroidTransformActive = false
   circumcenterMotionActive = false
 }
@@ -1033,6 +1097,7 @@ const wireControls = () => {
       if (indicatrixState.mode !== mode) {
         indicatrixState.vertices = indicatrixDefaultVertices(mode, indicatrixState.normedShape, indicatrixState.lorentzShape)
         indicatrixState.similarity = { translation: [0, 0], scale: 1 }
+        indicatrixState.circumcircleSeed = null
       }
       indicatrixState.mode = mode
       indicatrixCentroidTransformActive = false
@@ -1125,6 +1190,15 @@ const wireControls = () => {
       }
       if (key === 'centers' && !input.checked) {
         centroidTransformActive = false
+        lorentzianOriginBoostActive = false
+      }
+      if (key === 'transvection') {
+        lorentzianOriginBoostActive = false
+        transvectionSession = input.checked && isTransvectionMode(atlasState.mode)
+          ? { mode: atlasState.mode, vertices: cloneVertices(atlasState.vertices), coordinate: 0 }
+          : null
+        renderScene()
+        return
       }
       if (key === 'homothety') {
         if (input.checked) {
@@ -1251,6 +1325,7 @@ const wireControls = () => {
       const accepted = candidate ? clampVertex(candidate) : null
       if (accepted) {
         atlasState.vertices[vertexIndex] = accepted
+        rebaseTransvection()
         renderScene()
       } else {
         syncReadout()
@@ -1292,8 +1367,7 @@ const wireIndicatrixDrag = (svg: SVGSVGElement) => {
       event.preventDefault()
       return
     }
-    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
-    const closest = construction.vertices.map((vertex, index) => {
+    const closest = indicatrixState.vertices.map((vertex, index) => {
       const screen = indicatrixTransform!.toScreen(displayIndicatrixPoint(vertex))
       return { index, distance: Math.hypot(screen[0] - pointer[0], screen[1] - pointer[1]) }
     }).sort((first, second) => first.distance - second.distance)[0]
@@ -1344,10 +1418,11 @@ const wireIndicatrixDrag = (svg: SVGSVGElement) => {
     if (!indicatrixState.overlays.centers || !indicatrixTransform) {
       return
     }
-    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
-    const centroid = indicatrixTransform.toScreen(displayIndicatrixPoint(construction.centroid))
+    const [a, b, c] = indicatrixState.vertices
+    const centroid: Vec2 = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3]
+    const centroidScreen = indicatrixTransform.toScreen(displayIndicatrixPoint(centroid))
     const pointer = pointerPosition(svg, event)
-    if (Math.hypot(centroid[0] - pointer[0], centroid[1] - pointer[1]) > 16) {
+    if (Math.hypot(centroidScreen[0] - pointer[0], centroidScreen[1] - pointer[1]) > 16) {
       return
     }
     indicatrixCentroidTransformActive = !indicatrixCentroidTransformActive
@@ -1358,15 +1433,15 @@ const wireIndicatrixDrag = (svg: SVGSVGElement) => {
     if (!indicatrixCentroidTransformActive || !Number.isFinite(event.deltaY) || Math.abs(event.deltaY) <= 1e-12) {
       return
     }
-    const construction = buildIndicatrixConstruction(indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape)
     const factor = Math.exp(-Math.sign(event.deltaY) * 0.1)
     const previousScale = indicatrixState.similarity.scale
     const nextScale = Math.max(0.05, Math.min(20, previousScale * factor))
-    const centroid = displayIndicatrixPoint(construction.centroid)
+    const [a, b, c] = indicatrixState.vertices
+    const centroid = displayIndicatrixPoint([(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3])
     indicatrixState.similarity.scale = nextScale
     indicatrixState.similarity.translation = [
-      centroid[0] - nextScale * construction.centroid[0],
-      centroid[1] - nextScale * construction.centroid[1]
+      centroid[0] - nextScale * (a[0] + b[0] + c[0]) / 3,
+      centroid[1] - nextScale * (a[1] + b[1] + c[1]) / 3
     ]
     event.preventDefault()
     renderScene()
@@ -1380,6 +1455,8 @@ const wireDrag = (svg: SVGSVGElement) => {
   wiredViewports.add(svg)
   let dragIndex: number | null = null
   let translationAnchor: Vec2 | null = null
+  let transvectionDragging = false
+  let transvectionPointer: Vec2 | null = null
   svg.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) {
       return
@@ -1388,6 +1465,18 @@ const wireDrag = (svg: SVGSVGElement) => {
       return
     }
     const pointer = pointerPosition(svg, event)
+    const transvection = activeTransvection()
+    if (transvection) {
+      const marker = atlasTransform.toScreen(transvectionDisplayPoint(transvection))
+      if (Math.hypot(marker[0] - pointer[0], marker[1] - pointer[1]) <= 14) {
+        transvectionDragging = true
+        transvectionPointer = atlasTransform.toWorld(pointer)
+        atlasDragBounds = { ...atlasTransform.bounds }
+        svg.setPointerCapture(event.pointerId)
+        event.preventDefault()
+        return
+      }
+    }
     if (centroidTransformActive) {
       if (!visibleAreaCenter()) {
         centroidTransformActive = false
@@ -1420,6 +1509,33 @@ const wireDrag = (svg: SVGSVGElement) => {
     if (!atlasTransform) {
       return
     }
+    if (transvectionDragging) {
+      const transvection = activeTransvection()
+      if (!transvection) {
+        transvectionDragging = false
+        transvectionPointer = null
+        return
+      }
+      const point = atlasTransform.toWorld(pointerPosition(svg, event))
+      const coordinate = transvection.mode === 'sphere'
+        ? transvection.coordinate + 2 * (point[0] - (transvectionPointer ?? point)[0])
+        : transvection.mode === 'hyperbolic'
+          ? Math.max(-0.995, Math.min(0.995, point[0]))
+          : (() => {
+              const requested = transvection.mode === 'desitter' ? point[1] : point[0]
+              const [minimum, maximum] = transvectionLimits(transvection.mode, transvection.vertices)
+              return Math.max(minimum, Math.min(maximum, requested))
+            })()
+      transvectionPointer = point
+      const vertices = transvectionTriangle(transvection, coordinate)
+      const accepted = acceptedTransvectionTriangle(transvection, vertices)
+      if (accepted) {
+        transvection.coordinate = coordinate
+        atlasState.vertices = accepted
+        renderScene()
+      }
+      return
+    }
     if (translationAnchor) {
       const current = atlasTransform.toWorld(pointerPosition(svg, event))
       const vertices = usesBeltramiChart()
@@ -1429,6 +1545,7 @@ const wireDrag = (svg: SVGSVGElement) => {
       if (accepted) {
         atlasState.vertices = accepted
         translationAnchor = current
+        rebaseTransvection()
         renderScene()
       }
       return
@@ -1441,6 +1558,7 @@ const wireDrag = (svg: SVGSVGElement) => {
     const candidate = raw ? clampVertex(raw) : null
     if (candidate) {
       atlasState.vertices[dragIndex] = candidate
+      rebaseTransvection()
       renderScene()
     }
   })
@@ -1450,12 +1568,24 @@ const wireDrag = (svg: SVGSVGElement) => {
     }
     dragIndex = null
     translationAnchor = null
+    transvectionDragging = false
+    transvectionPointer = null
     atlasDragBounds = null
   }
   svg.addEventListener('pointerup', stopDragging)
   svg.addEventListener('pointercancel', stopDragging)
   svg.addEventListener('contextmenu', (event) => {
     const pointer = pointerPosition(svg, event)
+    const lorentzianOriginToggle = (atlasState.mode === 'desitter' || atlasState.mode === 'ads') && atlasState.overlays.centers && !atlasState.overlays.transvection
+    if (lorentzianOriginToggle && atlasTransform) {
+      const origin = atlasTransform.toScreen([0, 0])
+      if (Math.hypot(origin[0] - pointer[0], origin[1] - pointer[1]) <= 14) {
+        lorentzianOriginBoostActive = !lorentzianOriginBoostActive
+        event.preventDefault()
+        renderScene()
+        return
+      }
+    }
     const areaCenter = visibleAreaCenter()
     if (areaCenter && atlasTransform) {
       const center = atlasTransform.toScreen(areaCenter)
@@ -1539,23 +1669,25 @@ const wireDrag = (svg: SVGSVGElement) => {
       renderScene()
       return
     }
-    const boostActive = atlasState.mode === 'minkowski' && minkowskiBoostActive
+    const minkowskiOriginBoostActive = atlasState.mode === 'minkowski' && minkowskiBoostActive
+    const lorentzianBoostActive = (atlasState.mode === 'desitter' || atlasState.mode === 'ads') && lorentzianOriginBoostActive
     const rotationActive = atlasState.mode === 'euclidean' && euclideanRotationActive
-    if (!boostActive && !rotationActive) {
+    if (!minkowskiOriginBoostActive && !lorentzianBoostActive && !rotationActive) {
       return
     }
     if (!Number.isFinite(event.deltaY) || Math.abs(event.deltaY) <= 1e-12) {
       return
     }
     const amount = -Math.sign(event.deltaY) * 0.1
-    const vertices = boostActive
+    const vertices = minkowskiOriginBoostActive || lorentzianBoostActive
       ? boostTriangle(atlasState.vertices, [0, 0], amount)
       : rotateTriangle(atlasState.vertices, [0, 0], amount)
-    if (!vertices.every((vertex) => vertex.every(Number.isFinite))) {
+    const accepted = lorentzianBoostActive ? acceptedTriangle(vertices) : vertices
+    if (!accepted || !accepted.every((vertex) => vertex.every(Number.isFinite))) {
       return
     }
     event.preventDefault()
-    atlasState.vertices = vertices
+    atlasState.vertices = accepted
     renderScene()
   }, { passive: false })
 }

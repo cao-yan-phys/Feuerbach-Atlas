@@ -10,6 +10,14 @@ export interface LorentzFinslerShape {
   coefficients: [number, number, number]
 }
 
+export type CircumcircleStatus = 'ok' | 'degenerate-triangle' | 'no-circumcircle' | 'numerical-fitting-failure'
+
+export interface CircumcircleSeed {
+  center: Vec2
+  radius: number
+  parameters: [number, number, number]
+}
+
 export interface IndicatrixConstruction {
   mode: IndicatrixMode
   vertices: [Vec2, Vec2, Vec2]
@@ -23,6 +31,9 @@ export interface IndicatrixConstruction {
   feuerbachCenter: Vec2
   sideMidpoints: [Vec2, Vec2, Vec2]
   vertexOrthocenterMidpoints: [Vec2, Vec2, Vec2]
+  circumcircleStatus: CircumcircleStatus
+  circumcircleSeed: CircumcircleSeed | null
+  circumcircleResidual: number
   valid: boolean
 }
 
@@ -31,6 +42,11 @@ const lorentzCenters: [number, number, number] = [-1.1, 0.15, 1.25]
 const lorentzWidth = 1.9
 export const lorentzDisplayRapidity = 1.65
 export const lorentzRenderRapidity = 6
+const lorentzSolverRapidity = 12
+const minimumSolverRadius = 1e-4
+const maximumSolverRadius = 1e4
+const fitTolerance = 1e-7
+const noCircumcircleResidual = 1e-3
 
 const add = (first: Vec2, second: Vec2): Vec2 => [first[0] + second[0], first[1] + second[1]]
 const subtract = (first: Vec2, second: Vec2): Vec2 => [first[0] - second[0], first[1] - second[1]]
@@ -168,96 +184,166 @@ const solve = (matrix: number[][], vector: number[]) => {
 
 const wrapAngle = (value: number) => ((value % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
 
-const fitCircumIndicatrix = (mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape) => {
+interface FitOutcome {
+  values: number[]
+  norm: number
+  settled: boolean
+}
+
+const finiteSeed = (seed: CircumcircleSeed | null | undefined) => seed !== null && seed !== undefined && Number.isFinite(seed.center[0]) && Number.isFinite(seed.center[1]) && Number.isFinite(seed.radius) && seed.radius >= minimumSolverRadius && seed.radius <= maximumSolverRadius && seed.parameters.every(Number.isFinite)
+
+const fitCircumIndicatrix = (mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, continuation?: CircumcircleSeed | null) => {
   const initial = euclideanCircle(vertices)
   const pointAt = mode === 'normed'
     ? (parameter: number) => normedIndicatrixPoint(normedShape, parameter)
     : (parameter: number) => lorentzFinslerIndicatrixPoint(lorentzShape, parameter)
   const parameterAt = mode === 'normed'
     ? (point: Vec2) => nearestNormedParameter(normedShape, point)
-    : (point: Vec2) => nearestLorentzFinslerParameter(lorentzShape, point)
-  const normalize = (parameter: number) => mode === 'normed' ? wrapAngle(parameter) : Math.max(-4, Math.min(4, parameter))
-  let values = [initial.center[0], initial.center[1], Math.log(initial.radius), ...vertices.map((vertex) => parameterAt(scale(1 / initial.radius, subtract(vertex, initial.center))))]
+    : (point: Vec2) => nearestLorentzFinslerParameter(lorentzShape, point, lorentzSolverRapidity)
+  const normalize = (parameter: number) => mode === 'normed'
+    ? wrapAngle(parameter)
+    : Math.max(-lorentzSolverRapidity, Math.min(lorentzSolverRapidity, parameter))
+  const clampValues = (candidate: number[]) => {
+    const values = [...candidate]
+    values[2] = Math.max(Math.log(minimumSolverRadius), Math.min(Math.log(maximumSolverRadius), values[2]!))
+    for (let index = 3; index < 6; index += 1) {
+      values[index] = normalize(values[index]!)
+    }
+    return values
+  }
   const evaluate = (candidate: number[]) => vertices.flatMap((vertex, index) => {
     const unit = pointAt(candidate[index + 3]!)
     const radius = Math.exp(candidate[2]!)
     return [candidate[0]! + radius * unit[0] - vertex[0], candidate[1]! + radius * unit[1] - vertex[1]]
   })
-  let residuals = evaluate(values)
-  let norm = Math.hypot(...residuals)
-  for (let iteration = 0; iteration < 48 && norm > 1e-9; iteration += 1) {
-    const jacobian = Array.from({ length: 6 }, () => Array(6).fill(0))
-    const radius = Math.exp(values[2]!)
-    vertices.forEach((_, index) => {
-      const unit = pointAt(values[index + 3]!)
-      const step = 1e-5
-      const before = pointAt(values[index + 3]! - step)
-      const after = pointAt(values[index + 3]! + step)
-      const derivative: Vec2 = [(after[0] - before[0]) / (2 * step), (after[1] - before[1]) / (2 * step)]
-      const row = 2 * index
-      jacobian[row]![0] = 1
-      jacobian[row + 1]![1] = 1
-      jacobian[row]![2] = radius * unit[0]
-      jacobian[row + 1]![2] = radius * unit[1]
-      jacobian[row]![index + 3] = radius * derivative[0]
-      jacobian[row + 1]![index + 3] = radius * derivative[1]
-    })
-    const normal = Array.from({ length: 6 }, (_, row) => Array.from({ length: 6 }, (_, column) => jacobian.reduce((total, current) => total + current[row]! * current[column]!, row === column ? 1e-8 : 0)))
-    const right = Array.from({ length: 6 }, (_, column) => -jacobian.reduce((total, row, index) => total + row[column]! * residuals[index]!, 0))
-    const delta = solve(normal, right)
-    if (!delta) {
-      break
+  const outcome = (candidate: number[]): FitOutcome => {
+    let values = clampValues(candidate)
+    let residuals = evaluate(values)
+    let norm = Math.hypot(...residuals)
+    if (!Number.isFinite(norm)) {
+      return { values, norm: Infinity, settled: false }
     }
-    let accepted = false
-    for (const factor of [1, 0.5, 0.25, 0.125, 0.0625]) {
-      const candidate = values.map((value, index) => value + factor * delta[index]!)
-      candidate[2] = Math.max(Math.log(0.02), Math.min(Math.log(20), candidate[2]!))
-      for (let index = 3; index < 6; index += 1) {
-        candidate[index] = normalize(candidate[index]!)
+    for (let iteration = 0; iteration < 96 && norm > fitTolerance; iteration += 1) {
+      const jacobian = Array.from({ length: 6 }, () => Array(6).fill(0))
+      const radius = Math.exp(values[2]!)
+      vertices.forEach((_, index) => {
+        const unit = pointAt(values[index + 3]!)
+        const step = 1e-5
+        const before = pointAt(values[index + 3]! - step)
+        const after = pointAt(values[index + 3]! + step)
+        const derivative: Vec2 = [(after[0] - before[0]) / (2 * step), (after[1] - before[1]) / (2 * step)]
+        const row = 2 * index
+        jacobian[row]![0] = 1
+        jacobian[row + 1]![1] = 1
+        jacobian[row]![2] = radius * unit[0]
+        jacobian[row + 1]![2] = radius * unit[1]
+        jacobian[row]![index + 3] = radius * derivative[0]
+        jacobian[row + 1]![index + 3] = radius * derivative[1]
+      })
+      const right = Array.from({ length: 6 }, (_, column) => -jacobian.reduce((total, row, index) => total + row[column]! * residuals[index]!, 0))
+      const gradient = Math.hypot(...right)
+      let accepted = false
+      for (const damping of [1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1]) {
+        const normal = Array.from({ length: 6 }, (_, row) => Array.from({ length: 6 }, (_, column) => jacobian.reduce((total, current) => total + current[row]! * current[column]!, row === column ? damping : 0)))
+        const delta = solve(normal, right)
+        if (!delta || !delta.every(Number.isFinite)) {
+          continue
+        }
+        for (const factor of [1, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625]) {
+          const next = clampValues(values.map((value, index) => value + factor * delta[index]!))
+          const nextResiduals = evaluate(next)
+          const nextNorm = Math.hypot(...nextResiduals)
+          if (Number.isFinite(nextNorm) && nextNorm < norm) {
+            values = next
+            residuals = nextResiduals
+            norm = nextNorm
+            accepted = true
+            break
+          }
+        }
+        if (accepted) {
+          break
+        }
       }
-      const candidateResiduals = evaluate(candidate)
-      const candidateNorm = Math.hypot(...candidateResiduals)
-      if (candidateNorm < norm) {
-        values = candidate
-        residuals = candidateResiduals
-        norm = candidateNorm
-        accepted = true
-        break
+      if (!accepted) {
+        return { values, norm, settled: Number.isFinite(gradient) && gradient <= fitTolerance }
       }
     }
-    if (!accepted) {
-      break
+    return { values, norm, settled: Number.isFinite(norm) && norm <= fitTolerance }
+  }
+  const seedFor = (center: Vec2, radius: number) => {
+    const safeRadius = Math.max(minimumSolverRadius, Math.min(maximumSolverRadius, radius))
+    return [center[0], center[1], Math.log(safeRadius), ...vertices.map((vertex) => parameterAt(scale(1 / safeRadius, subtract(vertex, center))))]
+  }
+  const candidates: number[][] = []
+  if (finiteSeed(continuation)) {
+    const seed = continuation as CircumcircleSeed
+    candidates.push([seed.center[0], seed.center[1], Math.log(seed.radius), ...seed.parameters])
+  }
+  const centroid = scale(1 / 3, sum(vertices))
+  const centers: Vec2[] = [initial.center, centroid]
+  const minimumY = Math.min(...vertices.map((vertex) => vertex[1]))
+  const maximumY = Math.max(...vertices.map((vertex) => vertex[1]))
+  if (mode === 'lorentz-finsler') {
+    centers.push([centroid[0], minimumY - initial.radius], [centroid[0], maximumY + initial.radius])
+  }
+  const scales = mode === 'lorentz-finsler' ? [0.15, 1, 6] : [1]
+  centers.forEach((center) => scales.forEach((factor) => candidates.push(seedFor(center, factor * initial.radius))))
+  let best: FitOutcome | null = null
+  let allSettled = true
+  let allFinite = true
+  for (const candidate of candidates) {
+    const attempt = outcome(candidate)
+    if (!best || attempt.norm < best.norm) {
+      best = attempt
     }
+    if (attempt.norm <= fitTolerance) {
+      const seed: CircumcircleSeed = {
+        center: [attempt.values[0]!, attempt.values[1]!],
+        radius: Math.exp(attempt.values[2]!),
+        parameters: [attempt.values[3]!, attempt.values[4]!, attempt.values[5]!]
+      }
+      return { ...seed, status: 'ok' as const, residual: attempt.norm, seed }
+    }
+    allSettled &&= attempt.settled
+    allFinite &&= Number.isFinite(attempt.norm)
   }
-  return {
-    center: [values[0]!, values[1]!] as Vec2,
-    radius: Math.exp(values[2]!),
-    parameters: [values[3]!, values[4]!, values[5]!] as [number, number, number],
-    valid: Number.isFinite(norm) && norm <= 1e-5
-  }
+  const fallback = best ?? { values: seedFor(initial.center, initial.radius), norm: Infinity, settled: false }
+  const center: Vec2 = [fallback.values[0]!, fallback.values[1]!]
+  const radius = Math.exp(fallback.values[2]!)
+  const parameters: [number, number, number] = [fallback.values[3]!, fallback.values[4]!, fallback.values[5]!]
+  const status = allSettled || allFinite && fallback.norm > noCircumcircleResidual
+    ? 'no-circumcircle' as const
+    : 'numerical-fitting-failure' as const
+  return { center, radius, parameters, status, residual: fallback.norm, seed: null }
 }
 
-export const buildIndicatrixConstruction = (mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, renderRapidity = lorentzRenderRapidity): IndicatrixConstruction => {
+export const buildIndicatrixConstruction = (mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, renderRapidity = lorentzRenderRapidity, continuation?: CircumcircleSeed | null): IndicatrixConstruction => {
   const base = mode === 'normed'
     ? closedSamples((parameter) => normedIndicatrixPoint(normedShape, parameter))
     : openSamples((parameter) => lorentzFinslerIndicatrixPoint(lorentzShape, parameter), renderRapidity, Math.max(501, 1 + Math.round(300 * renderRapidity)))
-  const fit = fitCircumIndicatrix(mode, vertices, normedShape, lorentzShape)
+  const fit = triangleValid(vertices)
+    ? fitCircumIndicatrix(mode, vertices, normedShape, lorentzShape, continuation)
+    : { ...euclideanCircle(vertices), parameters: [0, 0, 0] as [number, number, number], status: 'degenerate-triangle' as const, residual: Infinity, seed: null }
   const [a, b, c] = vertices
   const origin = fit.center
   const orthocenter = subtract(sum(vertices), scale(2, origin))
   const centroid = scale(1 / 3, sum(vertices))
   const feuerbachCenter = mean(origin, orthocenter)
   const translatedCenters: [Vec2, Vec2, Vec2] = [add(origin, subtract(orthocenter, a)), add(origin, subtract(orthocenter, b)), add(origin, subtract(orthocenter, c))]
-  const translatedIndicatrices = translatedCenters.map((center) => translateSamples(base, center, fit.radius)) as [Vec2[], Vec2[], Vec2[]]
+  const drawable = fit.status === 'ok' || fit.status === 'numerical-fitting-failure'
+  const translatedIndicatrices = (drawable ? translatedCenters.map((center) => translateSamples(base, center, fit.radius)) : [[], [], []]) as [Vec2[], Vec2[], Vec2[]]
   const sideMidpoints: [Vec2, Vec2, Vec2] = [mean(b, c), mean(c, a), mean(a, b)]
   const vertexOrthocenterMidpoints: [Vec2, Vec2, Vec2] = [mean(a, orthocenter), mean(b, orthocenter), mean(c, orthocenter)]
-  const feuBranches = mode === 'normed'
+  const feuBranches = !drawable
+    ? []
+    : mode === 'normed'
     ? [translateSamples(base, feuerbachCenter, 0.5 * fit.radius)]
     : [translateSamples(base, feuerbachCenter, 0.5 * fit.radius), translateSamples(base, feuerbachCenter, -0.5 * fit.radius)]
   return {
     mode,
     vertices,
-    circumIndicatrix: translateSamples(base, origin, fit.radius),
+    circumIndicatrix: drawable ? translateSamples(base, origin, fit.radius) : [],
     translatedCenters,
     translatedIndicatrices,
     feuBranches,
@@ -267,7 +353,10 @@ export const buildIndicatrixConstruction = (mode: IndicatrixMode, vertices: [Vec
     feuerbachCenter,
     sideMidpoints,
     vertexOrthocenterMidpoints,
-    valid: triangleValid(vertices) && fit.valid
+    circumcircleStatus: fit.status,
+    circumcircleSeed: fit.seed,
+    circumcircleResidual: fit.residual,
+    valid: drawable
   }
 }
 
@@ -303,18 +392,18 @@ export const nearestNormedParameter = (shape: NormedShape, target: Vec2) => {
   return ((value % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
 }
 
-export const nearestLorentzFinslerParameter = (shape: LorentzFinslerShape, target: Vec2) => {
-  const count = 1200
+export const nearestLorentzFinslerParameter = (shape: LorentzFinslerShape, target: Vec2, rapidity = lorentzSolverRapidity) => {
+  const count = Math.max(1200, Math.ceil(360 * rapidity))
   let index = 0
   let distance = Infinity
   for (let candidate = 0; candidate < count; candidate += 1) {
-    const parameter = -lorentzDisplayRapidity + 2 * lorentzDisplayRapidity * candidate / (count - 1)
+    const parameter = -rapidity + 2 * rapidity * candidate / (count - 1)
     const next = squaredDistance(lorentzFinslerIndicatrixPoint(shape, parameter), target)
     if (next < distance) {
       distance = next
       index = candidate
     }
   }
-  const step = 2 * lorentzDisplayRapidity / (count - 1)
-  return Math.max(-lorentzDisplayRapidity, Math.min(lorentzDisplayRapidity, refineNearest((parameter) => lorentzFinslerIndicatrixPoint(shape, parameter), target, -lorentzDisplayRapidity + index * step - step, -lorentzDisplayRapidity + index * step + step)))
+  const step = 2 * rapidity / (count - 1)
+  return Math.max(-rapidity, Math.min(rapidity, refineNearest((parameter) => lorentzFinslerIndicatrixPoint(shape, parameter), target, -rapidity + index * step - step, -rapidity + index * step + step)))
 }

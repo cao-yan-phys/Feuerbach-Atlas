@@ -29,9 +29,16 @@ export interface Overlays {
   homothety: boolean
   grid: boolean
   singularBranches: boolean
+  transvection: boolean
 }
 
 export type NinePointHomothety = 'euler' | 'medial'
+export type TransvectionMode = 'sphere' | 'hyperbolic' | 'desitter' | 'ads'
+
+export interface TransvectionDisplay {
+  mode: TransvectionMode
+  coordinate: number
+}
 
 export interface ViewportTransform {
   bounds: Bounds
@@ -222,6 +229,21 @@ const drawRingMarker = (root: SVGElement, point: Vec2, transform: ViewportTransf
   append(root, element('circle', { cx, cy, r: radius, class: className, fill: 'none', 'data-boost-toggle': 'true' }))
 }
 
+const transvectionMarker = ({ mode, coordinate }: TransvectionDisplay): Vec2 => mode === 'desitter'
+  ? [0, coordinate]
+  : mode === 'sphere'
+    ? [Math.tan(coordinate / 2), 0]
+    : [coordinate, 0]
+
+const drawTransvectionTrack = (root: SVGElement, mode: TransvectionMode, transform: ViewportTransform) => {
+  const endpoints: [Vec2, Vec2] = mode === 'desitter'
+    ? [[0, -1], [0, 1]]
+    : mode === 'sphere'
+      ? [[transform.bounds.minX, 0], [transform.bounds.maxX, 0]]
+      : [[-1, 0], [1, 0]]
+  drawPolyline(root, endpoints, transform, 'transvection-track')
+}
+
 const gridStep = (span: number) => {
   const magnitude = 10 ** Math.floor(Math.log10(span / 8))
   return [1, 2, 5, 10].map((factor) => factor * magnitude).find((value) => span / value <= 10) ?? magnitude
@@ -375,7 +397,7 @@ const homotheticVertices = (vertices: [Vec2, Vec2, Vec2], center: Vec2, scale: n
 
 const drawFlatHomothety = (root: SVGElement, sigma: 1 | -1, first: FlatCycle, center: Vec2, scale: number, progress: number, transform: ViewportTransform) => {
   const imageScale = homothetyScaleAt(scale, progress)
-  if (Math.abs(imageScale) > 1e-10 && Math.abs(imageScale - 1) > 1e-10 && Math.abs(imageScale - scale) > 1e-10) {
+  if (Math.abs(imageScale) > 1e-10) {
     drawFlatCycle(root, sigma, {
       center: [center[0] + imageScale * (first.center[0] - center[0]), center[1] + imageScale * (first.center[1] - center[1])],
       radiusSquared: imageScale * imageScale * first.radiusSquared,
@@ -773,7 +795,7 @@ const drawFlat = (root: SVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, V
     drawFlatCycle(root, -1, minkowskiCircle, transform, 'cycle-minkowski-circumcircle')
   }
 
-  if (showTheorem && (overlays.circumcircle || homothety) && state.circumcircle) {
+  if (showTheorem && overlays.circumcircle && state.circumcircle) {
     drawFlatCycle(root, sigma, state.circumcircle, transform, 'cycle-circumcircle')
   }
 
@@ -1154,7 +1176,7 @@ const drawCurved = (root: SVGElement, mode: GeometryMode, vertices2: [Vec2, Vec2
   }
 }
 
-export const renderViewport = (svg: SVGSVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, Vec2], overlays: Overlays, selectedBranch: number, fixedBounds?: Bounds, boostActive = false, centroidTransformActive = false, circumcenterMotionActive = false, parabolicKappa = 0, parabolicChart: ParabolicChart = 'natural', parabolicView: ParabolicView = 'galilei', homothetyProgress = 0, homothetyKind: NinePointHomothety = 'euler'): ViewportTransform => {
+export const renderViewport = (svg: SVGSVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, Vec2], overlays: Overlays, selectedBranch: number, fixedBounds?: Bounds, boostActive = false, centroidTransformActive = false, circumcenterMotionActive = false, parabolicKappa = 0, parabolicChart: ParabolicChart = 'natural', parabolicView: ParabolicView = 'galilei', homothetyProgress = 0, homothetyKind: NinePointHomothety = 'euler', transvection?: TransvectionDisplay): ViewportTransform => {
   svg.replaceChildren()
   const transform = createTransform(fixedBounds ?? boundsForMode(mode, vertices), Boolean(fixedBounds))
   const projectiveTransform = mode === 'ads' ? adsProjectiveTransform(transform) : transform
@@ -1183,6 +1205,10 @@ export const renderViewport = (svg: SVGSVGElement, mode: GeometryMode, vertices:
     drawDeSitterHorizons(root, transform)
   }
 
+  if (transvection) {
+    drawTransvectionTrack(root, transvection.mode, transform)
+  }
+
   if (isParabolicMode(mode)) {
     drawParabolic(root, vertices, transform, overlays, parabolicKappa, parabolicChart, parabolicView)
   } else if (isCurvedMode(mode)) {
@@ -1206,7 +1232,9 @@ export const renderViewport = (svg: SVGSVGElement, mode: GeometryMode, vertices:
     }
   })
 
-  if ((mode === 'minkowski' && overlays.euclideanCircumcircle) || (mode === 'euclidean' && overlays.minkowskiCircumcircle)) {
+  if (transvection) {
+    drawRingMarker(root, transvectionMarker(transvection), transform, 'transvection-marker', 4.5)
+  } else if ((mode === 'minkowski' && overlays.euclideanCircumcircle) || (mode === 'euclidean' && overlays.minkowskiCircumcircle) || ((mode === 'desitter' || mode === 'ads') && overlays.centers)) {
     drawRingMarker(root, [0, 0], transform, `boost-toggle${boostActive ? ' is-active' : ''}`)
   }
 

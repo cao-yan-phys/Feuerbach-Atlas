@@ -1,4 +1,4 @@
-import { buildIndicatrixConstruction, lorentzRenderRapidity, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from '../math/indicatrixKernel'
+import { buildIndicatrixConstruction, lorentzRenderRapidity, type CircumcircleSeed, type CircumcircleStatus, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from '../math/indicatrixKernel'
 import type { Vec2 } from '../math/types'
 
 const namespace = 'http://www.w3.org/2000/svg'
@@ -90,13 +90,6 @@ const drawTriangle = (root: SVGElement, vertices: [Vec2, Vec2, Vec2], transform:
   })
 }
 
-const drawCone = (root: SVGElement, reach: number, transform: IndicatrixViewportTransform, mapPoint: (point: Vec2) => Vec2) => {
-  const rightRay: [Vec2, Vec2] = [[0, 0], [reach, reach]]
-  const leftRay: [Vec2, Vec2] = [[0, 0], [-reach, reach]]
-  drawPath(root, rightRay.map(mapPoint), transform, 'lorentz-cone')
-  drawPath(root, leftRay.map(mapPoint), transform, 'lorentz-cone')
-}
-
 const isOutsideViewport = ([x, y]: Vec2) => x <= 0 || x >= width || y <= 0 || y >= height
 
 const gridStep = (span: number) => {
@@ -185,9 +178,9 @@ const drawGrid = (root: SVGElement, transform: IndicatrixViewportTransform) => {
   }
 }
 
-export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, overlays: IndicatrixOverlays, similarity: IndicatrixSimilarity = { translation: [0, 0], scale: 1 }, centroidTransformActive = false, fixedBounds: IndicatrixBounds = indicatrixViewportBounds): { transform: IndicatrixViewportTransform; valid: boolean } => {
+export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, overlays: IndicatrixOverlays, similarity: IndicatrixSimilarity = { translation: [0, 0], scale: 1 }, centroidTransformActive = false, fixedBounds: IndicatrixBounds = indicatrixViewportBounds, continuation?: CircumcircleSeed | null): { transform: IndicatrixViewportTransform; valid: boolean; circumcircleStatus: CircumcircleStatus; circumcircleSeed: CircumcircleSeed | null } => {
   svg.replaceChildren()
-  const construction = buildIndicatrixConstruction(mode, vertices, normedShape, lorentzShape)
+  const construction = buildIndicatrixConstruction(mode, vertices, normedShape, lorentzShape, lorentzRenderRapidity, continuation)
   const mapPoint = ([x, y]: Vec2): Vec2 => [similarity.translation[0] + similarity.scale * x, similarity.translation[1] + similarity.scale * y]
   const structurePoints: Vec2[] = [
     ...construction.vertices,
@@ -204,7 +197,7 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
     : structurePoints
   const transform = transformFor(points.map(mapPoint), fixedBounds)
   let display = construction
-  if (mode === 'lorentz-finsler') {
+  if (mode === 'lorentz-finsler' && construction.circumcircleStatus === 'ok') {
     let rapidity = lorentzRenderRapidity
     while (rapidity < 24) {
       const candidates = [
@@ -217,7 +210,7 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
         break
       }
       rapidity *= 2
-      display = buildIndicatrixConstruction(mode, vertices, normedShape, lorentzShape, rapidity)
+      display = buildIndicatrixConstruction(mode, vertices, normedShape, lorentzShape, rapidity, construction.circumcircleSeed)
     }
   }
   const root = append(svg, element('g'))
@@ -227,14 +220,10 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
   if (overlays.grid) {
     drawGrid(root, transform)
   }
-  if (mode === 'lorentz-finsler') {
-    const reach = 20 * Math.max(1, ...structurePoints.map((point) => Math.max(Math.abs(point[0]), Math.abs(point[1]))))
-    drawCone(root, reach, transform, mapPoint)
-  }
-  if (overlays.circum) {
+  if (display.valid && overlays.circum) {
     drawMappedPath(display.circumIndicatrix, 'indicatrix-circum', mode === 'normed')
   }
-  if (display.valid && overlays.medians) {
+  if (overlays.medians) {
     display.vertices.forEach((vertex, index) => drawMappedPath([vertex, display.sideMidpoints[index]!], `indicatrix-median vertex-${index}`))
   }
   if (display.valid && overlays.translated) {
@@ -250,17 +239,21 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
     display.vertices.forEach((vertex, index) => drawMappedPath([vertex, display.orthocenter], `indicatrix-orthocenter-link vertex-${index}`))
   }
   drawTriangle(root, display.vertices, transform, mapPoint)
-  if (display.valid && overlays.midpoints) {
+  if (overlays.midpoints) {
     display.sideMidpoints.forEach((point, index) => drawMappedMarker(point, `indicatrix-side-midpoint vertex-${index}`, 3.7))
+  }
+  if (display.valid && overlays.midpoints) {
     display.vertexOrthocenterMidpoints.forEach((point, index) => drawMappedMarker(point, `indicatrix-vertex-midpoint vertex-${index}`, 3.9))
   }
-  if (display.valid && overlays.centers) {
-    drawMappedMarker(display.origin, 'indicatrix-origin', 3.8)
+  if (overlays.centers) {
+    if (display.valid) {
+      drawMappedMarker(display.origin, 'indicatrix-origin', 3.8)
+    }
     drawMappedMarker(display.centroid, `indicatrix-centroid${centroidTransformActive ? ' is-active' : ''}`, 3.8)
   }
   if (display.valid && overlays.translated) {
     drawMappedMarker(display.orthocenter, 'indicatrix-orthocenter', 4.5)
   }
   display.vertices.forEach((point, index) => drawMappedMarker(point, `vertex vertex-${index}`, 6, { 'data-indicatrix-vertex': String(index) }))
-  return { transform, valid: display.valid }
+  return { transform, valid: display.valid, circumcircleStatus: display.circumcircleStatus, circumcircleSeed: display.circumcircleSeed }
 }

@@ -635,6 +635,22 @@ h1 [data-katex] * {
   white-space: nowrap;
 }
 
+.indicatrix-detail-formula-aligned {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  justify-content: center;
+  align-items: baseline;
+  row-gap: 5px;
+}
+
+.indicatrix-detail-formula-aligned > span:nth-child(odd) {
+  text-align: right;
+}
+
+.indicatrix-detail-formula-aligned > span:nth-child(even) {
+  text-align: left;
+}
+
 .readout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -743,7 +759,7 @@ h1 [data-katex] * {
 }
 
 .cycle-homothety-image {
-  stroke: #806515;
+  stroke: #171717;
   stroke-width: 1.35;
   stroke-dasharray: 5 4;
 }
@@ -858,6 +874,25 @@ h1 [data-katex] * {
   stroke-dasharray: none;
 }
 
+.transvection-track {
+  fill: none;
+  stroke: #171717;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+
+.transvection-marker {
+  fill: #fff;
+  stroke: #171717;
+  stroke-width: 1.2;
+  cursor: grab;
+}
+
+.transvection-marker:active {
+  cursor: grabbing;
+}
+
 .area-bisector-center-marker {
   fill: #ff4f9a;
   stroke: #fff;
@@ -911,12 +946,6 @@ h1 [data-katex] * {
 .indicatrix-orthocenter-link {
   stroke: var(--construction-color);
   stroke-width: 1.1;
-}
-
-.lorentz-cone {
-  stroke: #b8b8b0;
-  stroke-width: 0.9;
-  stroke-dasharray: 4 5;
 }
 
 .indicatrix-origin {

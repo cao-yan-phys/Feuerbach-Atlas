@@ -133,10 +133,27 @@ describe('indicatrix kernel', () => {
     expect(endpointReach).toBeGreaterThan(20 * finiteReach)
   })
 
-  it('retains the indicatrix while rejecting derived data for a degenerate triangle', () => {
+  it('reports a degenerate triangle without constructing a circumcircle', () => {
     const vertex = normedIndicatrixPoint(normalizeNormedShape([0.1, 0, 0]), 0.2)
     const state = buildIndicatrixConstruction('normed', [vertex, vertex, vertex], normalizeNormedShape([0.1, 0, 0]), normalizeLorentzFinslerShape([0, 0, 0]))
-    expect(state.circumIndicatrix).toHaveLength(512)
+    expect(state.circumIndicatrix).toHaveLength(0)
+    expect(state.circumcircleStatus).toBe('degenerate-triangle')
+    expect(state.valid).toBe(false)
+  })
+
+  it('continues a Lorentz–Minkowski circumcircle while the shape changes', () => {
+    const firstShape = normalizeLorentzFinslerShape([0.22, -0.16, 0.12])
+    const vertices = [-0.8, 0.1, 0.9].map((parameter) => lorentzFinslerIndicatrixPoint(firstShape, parameter)) as [Vec2, Vec2, Vec2]
+    const first = buildIndicatrixConstruction('lorentz-finsler', vertices, normalizeNormedShape([0, 0, 0]), firstShape)
+    const second = buildIndicatrixConstruction('lorentz-finsler', vertices, normalizeNormedShape([0, 0, 0]), normalizeLorentzFinslerShape([1.2, -0.36, 0.27]), undefined, first.circumcircleSeed)
+    expect(first.circumcircleStatus).toBe('ok')
+    expect(second.circumcircleStatus).toBe('ok')
+    expect(second.circumcircleSeed).not.toBeNull()
+  })
+
+  it('reports the absence of a Lorentz–Minkowski circumcircle separately', () => {
+    const state = buildIndicatrixConstruction('lorentz-finsler', [[0, 0], [1, 0], [0, 1]], normalizeNormedShape([0, 0, 0]), normalizeLorentzFinslerShape([0, 0, 0]))
+    expect(state.circumcircleStatus).toBe('no-circumcircle')
     expect(state.valid).toBe(false)
   })
 })
