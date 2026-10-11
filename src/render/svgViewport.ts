@@ -207,7 +207,7 @@ const drawMarker = (root: SVGElement, point: Vec2, transform: ViewportTransform,
   append(root, element('circle', { cx, cy, r: radius, class: className }))
 }
 
-const drawStarMarker = (root: SVGElement, point: Vec2, transform: ViewportTransform, className: string, radius = 6) => {
+const drawStarMarker = (root: SVGElement, point: Vec2, transform: ViewportTransform, className: string, radius = 6, interactive = true) => {
   const [cx, cy] = transform.toScreen(point)
   if (!Number.isFinite(cx) || !Number.isFinite(cy) || cx < -radius || cx > width + radius || cy < -radius || cy > height + radius) {
     return
@@ -218,7 +218,7 @@ const drawStarMarker = (root: SVGElement, point: Vec2, transform: ViewportTransf
     return [cx + Math.cos(angle) * distance, cy + Math.sin(angle) * distance] as Vec2
   })
   const path = vertices.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(3)} ${y.toFixed(3)}`).join(' ') + ' Z'
-  append(root, element('path', { d: path, class: className, 'data-euclidean-circumcenter': 'true' }))
+  append(root, element('path', { d: path, class: className, ...(interactive ? { 'data-euclidean-circumcenter': 'true' } : {}) }))
 }
 
 const drawRingMarker = (root: SVGElement, point: Vec2, transform: ViewportTransform, className: string, radius = 4) => {
@@ -854,6 +854,9 @@ const drawFlat = (root: SVGElement, mode: GeometryMode, vertices: [Vec2, Vec2, V
     drawStarMarker(root, minkowskiCircle.center, transform, 'minkowski-circumcenter-marker')
   }
   if (showTheorem) {
+    if (overlays.altitudes && state.orthocenter) {
+      vertices.forEach((vertex, index) => drawStarMarker(root, [(vertex[0] + state.orthocenter![0]) / 2, (vertex[1] + state.orthocenter![1]) / 2], transform, indexedClass('altitude-marker', index), 6, false))
+    }
     state.midpoints.forEach((point, index) => drawMarker(root, point, transform, indexedClass('foot-marker', index), 3))
     state.altitudeFeet.forEach((point, index) => {
       if (point) {

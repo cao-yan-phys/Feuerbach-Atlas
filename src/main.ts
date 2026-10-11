@@ -6,11 +6,11 @@ import { curvedDomain, isCurvedMode, liftForMode, metricForMode } from './geomet
 import { boostTriangle, rotateTriangle, transvectHyperbolicTriangle, transvectLorentzianTriangle, transvectSphereTriangle } from './math/affine'
 import { buildCurvedState } from './math/curvedKernel'
 import { buildFlatState, euclideanCircumcircle, minkowskiCircumcycle } from './math/flatKernel'
-import { lorentzFinslerIndicatrixPoint, normedIndicatrixPoint, normalizeLorentzFinslerShape, normalizeNormedShape, type CircumcircleSeed, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from './math/indicatrixKernel'
+import { lorentzFinslerIndicatrixPoint, normedIndicatrixPoint, normalizeLorentzFinslerShape, normalizeNormedShape, type CircumcircleSeed, type IndicatrixConstruction, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from './math/indicatrixKernel'
 import { bilinear3, scale3 } from './math/linalg'
 import { buildParabolicState, canonicalParabolicParameters, canonicalToRawParabolic, isParabolicMode, parabolicDefaultKappa, parabolicDisplayPoint, parabolicModeForKappa, parabolicPointFromDisplay, type ParabolicChart, type ParabolicView } from './math/parabolicKernel'
 import type { GeometryMode, Vec2, Vec3 } from './math/types'
-import { indicatrixViewportBounds, renderIndicatrixViewport, type IndicatrixOverlays, type IndicatrixSimilarity, type IndicatrixViewportTransform } from './render/indicatrixViewport'
+import { indicatrixViewportBounds, renderIndicatrixViewport, type IndicatrixHomothety, type IndicatrixOverlays, type IndicatrixSimilarity, type IndicatrixViewportTransform } from './render/indicatrixViewport'
 import { renderViewport, type NinePointHomothety, type Overlays, type TransvectionDisplay, type TransvectionMode, type ViewportTransform } from './render/svgViewport'
 
 const atlasModes: Array<[GeometryMode, string, string]> = [
@@ -42,6 +42,8 @@ interface IndicatrixState {
   normedShape: NormedShape
   lorentzShape: LorentzFinslerShape
   similarity: IndicatrixSimilarity
+  homothetyProgress: number
+  homothetyKind: IndicatrixHomothety['kind']
   overlays: IndicatrixOverlays
   circumcircleSeed: CircumcircleSeed | null
 }
@@ -94,6 +96,8 @@ const indicatrixInitialState = (): IndicatrixState => {
     normedShape,
     lorentzShape,
     similarity: { translation: [0, 0], scale: 1 },
+    homothetyProgress: 0,
+    homothetyKind: 'orthocentric',
     circumcircleSeed: null,
     overlays: {
       medians: true,
@@ -102,7 +106,8 @@ const indicatrixInitialState = (): IndicatrixState => {
       feuerbach: true,
       midpoints: false,
       centers: true,
-      grid: false
+      grid: false,
+      homothety: false
     }
   }
 }
@@ -110,8 +115,9 @@ const indicatrixInitialState = (): IndicatrixState => {
 let activeView: 'atlas' | 'indicatrix' = 'atlas'
 let indicatrixState = indicatrixInitialState()
 let indicatrixCentroidTransformActive = false
+let indicatrixRenderedConstruction: IndicatrixConstruction | null = null
 
-const indicatrixOverlayKeys = ['medians', 'circum', 'translated', 'feuerbach', 'midpoints', 'centers', 'grid'] as const
+const indicatrixOverlayKeys = ['medians', 'circum', 'translated', 'feuerbach', 'midpoints', 'centers', 'grid', 'homothety'] as const
 
 const overlayKeys = ['bisectors', 'euler', 'altitudes', 'tangent', 'centers', 'circumcircle', 'euclideanCircumcircle', 'minkowskiCircumcircle', 'nullBoundary', 'horizon', 'homothety', 'grid', 'singularBranches', 'transvection'] as const
 
@@ -298,6 +304,21 @@ const indicatrixControl = (key: keyof IndicatrixOverlays, label: string) => `
   </label>
 `
 
+const indicatrixHomothetyControl = () => `
+  <div class="homothety-control">
+    ${indicatrixControl('homothety', 'Homothety')}
+    ${indicatrixState.overlays.homothety ? `
+      <div class="homothety-motion">
+        <div class="homothety-options" role="group" aria-label="Circle homothety">
+          <button class="homothety-kind-button${indicatrixState.homothetyKind === 'orthocentric' ? ' is-active' : ''}" type="button" data-indicatrix-homothety-kind="orthocentric" aria-pressed="${indicatrixState.homothetyKind === 'orthocentric'}"><span data-katex="\\mathrm{I}">I</span></button>
+          <button class="homothety-kind-button${indicatrixState.homothetyKind === 'medial' ? ' is-active' : ''}" type="button" data-indicatrix-homothety-kind="medial" aria-pressed="${indicatrixState.homothetyKind === 'medial'}"><span data-katex="\\mathrm{II}">II</span></button>
+        </div>
+        <input class="homothety-progress" type="range" min="0" max="1" step="0.01" value="${indicatrixState.homothetyProgress}" data-indicatrix-homothety-progress aria-label="Homothety progress" />
+      </div>
+    ` : ''}
+  </div>
+`
+
 const indicatrixControls = () => {
   const shape = indicatrixState.mode === 'normed' ? indicatrixState.normedShape : indicatrixState.lorentzShape
   const feuLabel = 'Feuerbach circle'
@@ -316,6 +337,7 @@ const indicatrixControls = () => {
     <div class="toggle-grid">
       ${indicatrixControl('medians', 'Medians')}
       ${indicatrixControl('circum', 'Circumcircle')}
+      ${indicatrixHomothetyControl()}
       ${indicatrixControl('translated', '<span data-katex="C">C</span>-orthocenter')}
       ${indicatrixControl('feuerbach', feuLabel)}
       ${indicatrixControl('midpoints', 'Midpoints')}
@@ -846,6 +868,8 @@ const currentLink = () => {
       l: indicatrixState.lorentzShape.coefficients.join(','),
       a: indicatrixState.similarity.translation.join(','),
       s: String(indicatrixState.similarity.scale),
+      h: String(indicatrixState.homothetyProgress),
+      u: indicatrixState.homothetyKind,
       o: indicatrixOverlayKeys.map((key) => indicatrixState.overlays[key] ? '1' : '0').join('')
     })
     url.hash = state.toString()
@@ -1011,14 +1035,15 @@ const syncIndicatrixData = () => {
   })
 }
 
-const renderScene = () => {
+const renderScene = (reuseIndicatrixConstruction = false) => {
   const svg = atlasApp.querySelector<SVGSVGElement>('.geometry-viewport')
   if (!svg) {
     return
   }
   if (activeView === 'indicatrix') {
-    const rendered = renderIndicatrixViewport(svg, indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape, indicatrixState.overlays, indicatrixState.similarity, indicatrixCentroidTransformActive, indicatrixViewportBounds, indicatrixState.circumcircleSeed)
+    const rendered = renderIndicatrixViewport(svg, indicatrixState.mode, indicatrixState.vertices, indicatrixState.normedShape, indicatrixState.lorentzShape, indicatrixState.overlays, indicatrixState.similarity, indicatrixCentroidTransformActive, indicatrixViewportBounds, indicatrixState.circumcircleSeed, { progress: indicatrixState.homothetyProgress, kind: indicatrixState.homothetyKind }, reuseIndicatrixConstruction ? indicatrixRenderedConstruction ?? undefined : undefined)
     indicatrixTransform = rendered.transform
+    indicatrixRenderedConstruction = rendered.construction
     if (rendered.circumcircleSeed) {
       indicatrixState.circumcircleSeed = rendered.circumcircleSeed
     }
@@ -1273,10 +1298,35 @@ const wireControls = () => {
     input.addEventListener('change', () => {
       const key = input.dataset.indicatrixOverlay as keyof IndicatrixOverlays
       indicatrixState.overlays[key] = input.checked
+      if (key === 'homothety') {
+        if (input.checked) {
+          indicatrixState.homothetyProgress = 0
+        }
+        atlasShell()
+        return
+      }
       if (key === 'centers' && !input.checked) {
         indicatrixCentroidTransformActive = false
       }
       renderScene()
+    })
+  })
+  atlasApp.querySelector<HTMLInputElement>('[data-indicatrix-homothety-progress]')?.addEventListener('input', (event) => {
+    const value = Number((event.currentTarget as HTMLInputElement).value)
+    if (Number.isFinite(value)) {
+      indicatrixState.homothetyProgress = Math.max(0, Math.min(1, value))
+      renderScene(true)
+    }
+  })
+  atlasApp.querySelectorAll<HTMLButtonElement>('[data-indicatrix-homothety-kind]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const kind = button.dataset.indicatrixHomothetyKind
+      if (kind !== 'orthocentric' && kind !== 'medial') {
+        return
+      }
+      indicatrixState.homothetyKind = kind
+      indicatrixState.homothetyProgress = 0
+      atlasShell()
     })
   })
   atlasApp.querySelector<HTMLInputElement>('[data-parabolic-kappa]')?.addEventListener('input', (event) => {
@@ -1739,6 +1789,8 @@ const hydrateLinkedState = () => {
     const lorentz = state.get('l')?.split(',').map(Number)
     const translation = state.get('a')?.split(',').map(Number)
     const scale = Number(state.get('s'))
+    const homothetyProgress = Number(state.get('h'))
+    const homothetyKind = state.get('u')
     const overlays = state.get('o')
     activeView = 'indicatrix'
     indicatrixState.mode = indicatrixMode
@@ -1761,8 +1813,10 @@ const hydrateLinkedState = () => {
     if (translation?.length === 2 && translation.every(Number.isFinite) && Number.isFinite(scale) && scale >= 0.05 && scale <= 20) {
       indicatrixState.similarity = { translation: [translation[0]!, translation[1]!], scale }
     }
-    if (overlays && overlays.length === indicatrixOverlayKeys.length && /^[01]+$/.test(overlays)) {
-      indicatrixOverlayKeys.forEach((key, index) => {
+    indicatrixState.homothetyProgress = Number.isFinite(homothetyProgress) ? Math.max(0, Math.min(1, homothetyProgress)) : 0
+    indicatrixState.homothetyKind = homothetyKind === 'medial' ? 'medial' : 'orthocentric'
+    if (overlays && overlays.length <= indicatrixOverlayKeys.length && /^[01]+$/.test(overlays)) {
+      indicatrixOverlayKeys.slice(0, overlays.length).forEach((key, index) => {
         indicatrixState.overlays[key] = overlays[index] === '1'
       })
     }

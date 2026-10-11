@@ -1,4 +1,4 @@
-import { buildIndicatrixConstruction, lorentzRenderRapidity, type CircumcircleSeed, type CircumcircleStatus, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from '../math/indicatrixKernel'
+import { buildIndicatrixConstruction, lorentzRenderRapidity, type CircumcircleSeed, type CircumcircleStatus, type IndicatrixConstruction, type IndicatrixMode, type LorentzFinslerShape, type NormedShape } from '../math/indicatrixKernel'
 import type { Vec2 } from '../math/types'
 
 const namespace = 'http://www.w3.org/2000/svg'
@@ -14,6 +14,7 @@ export interface IndicatrixOverlays {
   midpoints: boolean
   centers: boolean
   grid: boolean
+  homothety: boolean
 }
 
 export interface IndicatrixViewportTransform {
@@ -30,6 +31,11 @@ export interface IndicatrixBounds {
 export interface IndicatrixSimilarity {
   translation: Vec2
   scale: number
+}
+
+export interface IndicatrixHomothety {
+  progress: number
+  kind: 'orthocentric' | 'medial'
 }
 
 export const indicatrixViewportBounds: IndicatrixBounds = { halfWidth: 2.2, halfHeight: 1.54 }
@@ -83,12 +89,32 @@ const drawMarker = (root: SVGElement, point: Vec2, transform: IndicatrixViewport
   append(root, element('circle', { cx, cy, r: radius, class: className, ...attribute }))
 }
 
+const drawStarMarker = (root: SVGElement, point: Vec2, transform: IndicatrixViewportTransform, className: string, radius = 6) => {
+  const [cx, cy] = transform.toScreen(point)
+  const points = Array.from({ length: 10 }, (_, index) => {
+    const angle = -Math.PI / 2 + index * Math.PI / 5
+    const distance = index % 2 === 0 ? radius : radius * 0.42
+    return [cx + Math.cos(angle) * distance, cy + Math.sin(angle) * distance] as Vec2
+  })
+  const d = points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(3)} ${y.toFixed(3)}`).join(' ') + ' Z'
+  append(root, element('path', { d, class: className }))
+}
+
 const drawTriangle = (root: SVGElement, vertices: [Vec2, Vec2, Vec2], transform: IndicatrixViewportTransform, mapPoint: (point: Vec2) => Vec2) => {
   vertices.forEach((_, index) => {
     const side: [Vec2, Vec2] = [vertices[(index + 1) % 3]!, vertices[(index + 2) % 3]!]
     drawPath(root, side.map(mapPoint), transform, `indicatrix-triangle vertex-${index}`)
   })
 }
+
+const homothetyScaleAt = (scale: number, progress: number) => 1 + progress * (scale - 1)
+
+const homotheticPoint = (point: Vec2, center: Vec2, scale: number, progress: number): Vec2 => {
+  const imageScale = homothetyScaleAt(scale, progress)
+  return [center[0] + imageScale * (point[0] - center[0]), center[1] + imageScale * (point[1] - center[1])]
+}
+
+const homotheticVertices = (vertices: [Vec2, Vec2, Vec2], center: Vec2, scale: number, progress: number) => vertices.map((vertex) => homotheticPoint(vertex, center, scale, progress)) as [Vec2, Vec2, Vec2]
 
 const isOutsideViewport = ([x, y]: Vec2) => x <= 0 || x >= width || y <= 0 || y >= height
 
@@ -178,9 +204,9 @@ const drawGrid = (root: SVGElement, transform: IndicatrixViewportTransform) => {
   }
 }
 
-export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, overlays: IndicatrixOverlays, similarity: IndicatrixSimilarity = { translation: [0, 0], scale: 1 }, centroidTransformActive = false, fixedBounds: IndicatrixBounds = indicatrixViewportBounds, continuation?: CircumcircleSeed | null): { transform: IndicatrixViewportTransform; valid: boolean; circumcircleStatus: CircumcircleStatus; circumcircleSeed: CircumcircleSeed | null } => {
+export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMode, vertices: [Vec2, Vec2, Vec2], normedShape: NormedShape, lorentzShape: LorentzFinslerShape, overlays: IndicatrixOverlays, similarity: IndicatrixSimilarity = { translation: [0, 0], scale: 1 }, centroidTransformActive = false, fixedBounds: IndicatrixBounds = indicatrixViewportBounds, continuation?: CircumcircleSeed | null, homothety?: IndicatrixHomothety, cachedConstruction?: IndicatrixConstruction): { transform: IndicatrixViewportTransform; valid: boolean; circumcircleStatus: CircumcircleStatus; circumcircleSeed: CircumcircleSeed | null; construction: IndicatrixConstruction } => {
   svg.replaceChildren()
-  const construction = buildIndicatrixConstruction(mode, vertices, normedShape, lorentzShape, lorentzRenderRapidity, continuation)
+  const construction = cachedConstruction ?? buildIndicatrixConstruction(mode, vertices, normedShape, lorentzShape, lorentzRenderRapidity, continuation)
   const mapPoint = ([x, y]: Vec2): Vec2 => [similarity.translation[0] + similarity.scale * x, similarity.translation[1] + similarity.scale * y]
   const structurePoints: Vec2[] = [
     ...construction.vertices,
@@ -197,7 +223,7 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
     : structurePoints
   const transform = transformFor(points.map(mapPoint), fixedBounds)
   let display = construction
-  if (mode === 'lorentz-finsler' && construction.circumcircleStatus === 'ok') {
+  if (!cachedConstruction && mode === 'lorentz-finsler' && construction.circumcircleStatus === 'ok') {
     let rapidity = lorentzRenderRapidity
     while (rapidity < 24) {
       const candidates = [
@@ -216,6 +242,9 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
   const root = append(svg, element('g'))
   const drawMappedPath = (points: Vec2[], className: string, closed = false) => drawPath(root, points.map(mapPoint), transform, className, closed)
   const drawMappedMarker = (point: Vec2, className: string, radius: number, attribute?: Record<string, string>) => drawMarker(root, mapPoint(point), transform, className, radius, attribute)
+  const homothetyData = display.valid && overlays.homothety && homothety
+    ? { center: homothety.kind === 'orthocentric' ? display.orthocenter : display.centroid, scale: homothety.kind === 'orthocentric' ? 0.5 : -0.5, progress: homothety.progress }
+    : null
 
   if (overlays.grid) {
     drawGrid(root, transform)
@@ -235,15 +264,35 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
   if (display.valid && overlays.feuerbach) {
     display.feuBranches.forEach((curve, index) => drawMappedPath(curve, index === 0 ? 'indicatrix-feuerbach-forward' : 'indicatrix-feuerbach-reflected', mode === 'normed'))
   }
+  if (homothetyData) {
+    const imageScale = homothetyScaleAt(homothetyData.scale, homothetyData.progress)
+    if (Math.abs(imageScale) > 1e-10) {
+      drawMappedPath(display.circumIndicatrix.map((point) => homotheticPoint(point, homothetyData.center, homothetyData.scale, homothetyData.progress)), 'cycle-homothety-image', mode === 'normed')
+    }
+  }
   if (display.valid && overlays.midpoints) {
     display.vertices.forEach((vertex, index) => drawMappedPath([vertex, display.orthocenter], `indicatrix-orthocenter-link vertex-${index}`))
   }
   drawTriangle(root, display.vertices, transform, mapPoint)
+  if (homothetyData) {
+    const imageScale = homothetyScaleAt(homothetyData.scale, homothetyData.progress)
+    if (Math.abs(imageScale) > 1e-10 && Math.abs(imageScale - 1) > 1e-10) {
+      const image = homotheticVertices(display.vertices, homothetyData.center, homothetyData.scale, homothetyData.progress)
+      image.forEach((_, index) => drawMappedPath([image[(index + 1) % 3]!, image[(index + 2) % 3]!], `homothety-triangle vertex-${index}`))
+      image.forEach((point, index) => drawMappedMarker(point, `homothety-triangle-marker vertex-${index}`, 4.5))
+    }
+  }
   if (overlays.midpoints) {
     display.sideMidpoints.forEach((point, index) => drawMappedMarker(point, `indicatrix-side-midpoint vertex-${index}`, 3.7))
   }
   if (display.valid && overlays.midpoints) {
-    display.vertexOrthocenterMidpoints.forEach((point, index) => drawMappedMarker(point, `indicatrix-vertex-midpoint vertex-${index}`, 3.9))
+    display.vertexOrthocenterMidpoints.forEach((point, index) => {
+      if (mode === 'normed') {
+        drawStarMarker(root, mapPoint(point), transform, `indicatrix-vertex-midpoint vertex-${index}`)
+      } else {
+        drawMappedMarker(point, `indicatrix-vertex-midpoint vertex-${index}`, 3.9)
+      }
+    })
   }
   if (overlays.centers) {
     if (display.valid) {
@@ -255,5 +304,5 @@ export const renderIndicatrixViewport = (svg: SVGSVGElement, mode: IndicatrixMod
     drawMappedMarker(display.orthocenter, 'indicatrix-orthocenter', 4.5)
   }
   display.vertices.forEach((point, index) => drawMappedMarker(point, `vertex vertex-${index}`, 6, { 'data-indicatrix-vertex': String(index) }))
-  return { transform, valid: display.valid, circumcircleStatus: display.circumcircleStatus, circumcircleSeed: display.circumcircleSeed }
+  return { transform, valid: display.valid, circumcircleStatus: display.circumcircleStatus, circumcircleSeed: display.circumcircleSeed, construction: display }
 }
